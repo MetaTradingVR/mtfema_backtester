@@ -1,0 +1,65 @@
+site_name: Multi-Timeframe 9 EMA Extension Strategy
+site_description: A comprehensive backtesting system for the Multi-Timeframe 9 EMA Extension trading strategy.
+site_author: Your Name
+repo_url: https://github.com/yourusername/mtfema-backtester
+theme: material
+
+nav:
+  - Home: index.md
+  - Enhancements: 
+      - Overview: enhancements.md
+      - Enhancement Summary: enhancement_summary.md
+  - Getting Started: 
+      - Installation: installation.md
+      - Quick Start: quickstart.md
+  - User Guide:
+      - Configuration: configuration.md
+      - Running Backtests: backtests.md
+      - Analyzing Results: results.md
+  - Developer Guide:
+      - Architecture: architecture.md
+      - Testing: testing.md
+      - Contributing: contributing.md
+  - Community Features:
+      - Overview: community/overview.md
+      - Prioritization Framework: prioritization_framework.md
+      - Setup Sharing: community/setup_sharing.md
+      - Trading Signals: community/trading_signals.md
+      - Forums: community/forums.md
+  - Advanced Features:
+      - Feature Flags: feature_flags.md
+      - API Rate Limiting: api_rate_limiting.md
+      - Metrics Collection: metrics_collection.md
+      - Localization: localization_plan.md
+      - Mobile Accessibility: mobile_accessibility.md
+      - Security Considerations: security_considerations.md
+  - API Reference:
+      - Backtester: api/backtester.md
+      - Indicators: api/indicators.md
+      - Strategy: api/strategy.md
+      - Configuration: api/configuration.md
+      - Community API: api/community.md
+      - Feature Flags API: api/feature_flags.md
+
+markdown_extensions:
+  - admonition
+  - codehilite
+  - footnotes
+  - toc:
+      permalink: true
+  - pymdownx.highlight
+  - pymdownx.superfences
+  - pymdownx.tabbed
+  - pymdownx.emoji
+
+plugins:
+  - search
+  - mkdocstrings
+
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/yourusername/mtfema-backtester
+
+extra_css:
+  - stylesheets/extra.css 
