@@ -1,0 +1,38 @@
+version: '3.8'
+
+services:
+  mtfema-backtester:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    volumes:
+      # Mount data directory for persistence
+      - ./data:/app/data
+      # Mount results directory for output
+      - ./results:/app/results
+      # Mount logs for debugging
+      - ./logs:/app/logs
+      # Mount configuration files (optional, for easy editing)
+      - ./mtfema_backtester/config.yaml:/app/mtfema_backtester/config.yaml
+    # Default command - can be overridden via command line
+    command: >
+      --mode backtest 
+      --symbol SPY 
+      --timeframes 1d,1h,15m 
+      --start-date 2023-01-01 
+      --end-date 2023-12-31 
+      --initial-capital 100000 
+      --risk-per-trade 1.0 
+      --save-plots
+
+  # You can add services for visualization dashboards later
+  # dashboard:
+  #   build:
+  #     context: .
+  #     dockerfile: Dockerfile.dashboard
+  #   ports:
+  #     - "8050:8050"
+  #   depends_on:
+  #     - mtfema-backtester
+  #   volumes:
+  #     - ./results:/app/results 

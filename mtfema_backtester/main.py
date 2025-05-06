@@ -25,7 +25,7 @@ from mtfema_backtester.indicators.ema import calculate_ema, detect_9ema_extensio
 from mtfema_backtester.indicators.bollinger import calculate_bollinger_bands, detect_bollinger_breakouts
 from mtfema_backtester.indicators.paperfeet import calculate_paperfeet_rsi
 from mtfema_backtester.strategy.extension_detector import detect_extensions
-from mtfema_backtester.strategy.reclamation_detector import detect_reclamations
+from mtfema_backtester.strategy.reclamation_detector import ReclamationDetector
 from mtfema_backtester.visualization.plot_indicators import plot_ema_extension, plot_bollinger_bands
 from mtfema_backtester.utils.logger import setup_logger
 from mtfema_backtester.backtest.backtest_engine import BacktestEngine
@@ -150,10 +150,24 @@ def run_test_mode(args, logger):
         tf_data.add_indicator(tf, "ExtensionSignal", signals)
         
         # Calculate Bollinger Bands
-        bb = calculate_bollinger_bands(data, period=20, std_dev=2.0)
-        if not bb.empty:
+        middle_band, upper_band, lower_band = calculate_bollinger_bands(data, period=20, stdev=2.0)
+        if not (middle_band.empty or upper_band.empty or lower_band.empty):
+            # Ensure the data is 1-dimensional
+            if hasattr(middle_band, 'values'):
+                middle_band = middle_band.values
+            if hasattr(upper_band, 'values'):
+                upper_band = upper_band.values
+            if hasattr(lower_band, 'values'):
+                lower_band = lower_band.values
+                
+            # Create a DataFrame with all bands
+            bb = pd.DataFrame({
+                'Middle': middle_band,
+                'Upper': upper_band,
+                'Lower': lower_band
+            }, index=data.index)
             tf_data.add_indicator(tf, "BollingerBands", bb)
-            bb_signals = detect_bollinger_breakouts(data, bb)
+            bb_signals = detect_bollinger_breakouts(data, upper_band, lower_band)
             tf_data.add_indicator(tf, "BollingerBreakout", bb_signals)
         
         # Calculate PaperFeet Laguerre RSI
@@ -177,7 +191,7 @@ def run_test_mode(args, logger):
             logger.info(f"Saved EMA extension plot for {tf} timeframe")
             
             # Bollinger Bands plot
-            if not bb.empty:
+            if not (middle_band.empty or upper_band.empty or lower_band.empty):
                 bb_plot = plot_bollinger_bands(
                     data, bb, bb_signals,
                     title=f"{args.symbol} {tf} - Bollinger Bands"
@@ -232,8 +246,22 @@ def run_backtest_mode(args, logger):
         tf_data.add_indicator(tf, f"EMA_{args.ema_period}", ema)
         
         # Calculate Bollinger Bands
-        bb = calculate_bollinger_bands(data, period=20, std_dev=2.0)
-        if not bb.empty:
+        middle_band, upper_band, lower_band = calculate_bollinger_bands(data, period=20, stdev=2.0)
+        if not (middle_band.empty or upper_band.empty or lower_band.empty):
+            # Ensure the data is 1-dimensional
+            if hasattr(middle_band, 'values'):
+                middle_band = middle_band.values
+            if hasattr(upper_band, 'values'):
+                upper_band = upper_band.values
+            if hasattr(lower_band, 'values'):
+                lower_band = lower_band.values
+                
+            # Create a DataFrame with all bands
+            bb = pd.DataFrame({
+                'Middle': middle_band,
+                'Upper': upper_band,
+                'Lower': lower_band
+            }, index=data.index)
             tf_data.add_indicator(tf, "BollingerBands", bb)
         
         # Calculate PaperFeet Laguerre RSI

@@ -185,3 +185,106 @@ class TimeframeData:
                     result[ind_name] = ind_data
         
         return result
+
+    def get_timeframe_minutes(self, timeframe):
+        """
+        Convert timeframe string to minutes
+        
+        Parameters:
+        -----------
+        timeframe : str
+            Timeframe identifier (e.g., '1d', '1h', '15m')
+        
+        Returns:
+        --------
+        int
+            Number of minutes in the timeframe
+        """
+        # Handle special case for 1
+        if timeframe == '1':
+            timeframe = '1d'  # Assume 1 means 1 day
+        
+        if timeframe.endswith('m'):
+            try:
+                return int(timeframe[:-1])
+            except ValueError:
+                logger.warning(f"Invalid minute timeframe format: {timeframe}")
+                return 1440  # Default to daily
+            
+        elif timeframe.endswith('h'):
+            try:
+                return int(timeframe[:-1]) * 60
+            except ValueError:
+                logger.warning(f"Invalid hour timeframe format: {timeframe}")
+                return 1440  # Default to daily
+            
+        elif timeframe.endswith('d'):
+            try:
+                return int(timeframe[:-1]) * 1440
+            except ValueError:
+                logger.warning(f"Invalid day timeframe format: {timeframe}")
+                return 1440  # Default to daily
+            
+        elif timeframe.endswith('w'):
+            try:
+                return int(timeframe[:-1]) * 1440 * 7
+            except ValueError:
+                logger.warning(f"Invalid week timeframe format: {timeframe}")
+                return 1440 * 7  # Default to weekly
+        
+        logger.warning(f"Unknown timeframe format: {timeframe}, defaulting to daily")
+        return 1440  # Default to daily
+
+    def map_index_between_timeframes(self, source_tf, source_idx, target_tf):
+        """
+        Map an index from one timeframe to another
+        
+        Parameters:
+        -----------
+        source_tf : str
+            Source timeframe identifier
+        source_idx : int
+            Index position in the source timeframe
+        target_tf : str
+            Target timeframe identifier
+        
+        Returns:
+        --------
+        int
+            Corresponding index in the target timeframe
+        """
+        if source_tf not in self.data or target_tf not in self.data:
+            logger.warning(f"One of the timeframes ({source_tf}, {target_tf}) not found")
+            return 0
+        
+        # For simplicity, if source and target are the same, return the same index
+        if source_tf == target_tf:
+            return min(source_idx, len(self.data[target_tf]) - 1)
+        
+        # Get the corresponding timestamp
+        if source_idx >= len(self.data[source_tf]):
+            source_idx = len(self.data[source_tf]) - 1
+        
+        timestamp = self.data[source_tf].index[source_idx]
+        
+        # Find the closest timestamp in the target timeframe
+        target_data = self.data[target_tf]
+        
+        # If timestamp is before the first timestamp in target data,
+        # return the first index
+        if timestamp < target_data.index[0]:
+            return 0
+        
+        # If timestamp is after the last timestamp in target data,
+        # return the last index
+        if timestamp > target_data.index[-1]:
+            return len(target_data) - 1
+        
+        # Find the closest timestamp that is less than or equal to the source timestamp
+        for i, ts in enumerate(target_data.index):
+            if ts > timestamp:
+                return max(0, i - 1)
+        
+        # If we've gone through all timestamps and haven't found a match,
+        # return the last index
+        return len(target_data) - 1

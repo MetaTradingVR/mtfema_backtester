@@ -10,7 +10,7 @@ import pandas as pd
 import numpy as np
 
 from mtfema_backtester.strategy.extension_detector import detect_extensions
-from mtfema_backtester.strategy.reclamation_detector import detect_reclamations
+from mtfema_backtester.strategy.reclamation_detector import ReclamationDetector
 from mtfema_backtester.strategy.pullback_validator import validate_pullback
 from mtfema_backtester.strategy.conflict_resolver import ConflictResolver, validate_signal_context
 from mtfema_backtester.strategy.target_manager import get_target_for_signal
@@ -23,7 +23,7 @@ class SignalGenerator:
     Generates trading signals by integrating all strategy components.
     """
     
-    def __init__(self, timeframe_data):
+    def __init__(self, timeframe_data, ema_period=9):
         """
         Initialize the SignalGenerator
         
@@ -31,9 +31,12 @@ class SignalGenerator:
         -----------
         timeframe_data : TimeframeData
             Multi-timeframe data
+        ema_period : int
+            EMA period to use for strategy calculations (default: 9)
         """
         self.timeframe_data = timeframe_data
         self.conflict_resolver = ConflictResolver()
+        self.ema_period = ema_period
         
         # Get available timeframes sorted by timeframe minutes
         self.timeframes = self.timeframe_data.get_available_timeframes()
@@ -72,29 +75,30 @@ class SignalGenerator:
     
     def detect_reclamations_for_all_timeframes(self):
         """
-        Detect EMA reclamations across all timeframes
+        Detect price reclamations of the EMA for all timeframes
         
         Returns:
         --------
         dict
-            Dictionary with reclamation data for each timeframe
+            Dictionary with timeframes as keys and reclamation DataFrames as values
         """
-        reclamations = {}
+        reclamation_data = {}
         
-        for tf in self.timeframes:
-            # Get timeframe data
+        for tf in self.timeframe_data.get_available_timeframes():
+            logger.info(f"Detecting reclamations for {tf} timeframe")
             tf_data = self.timeframe_data.get_timeframe(tf)
+            ema_data = self.timeframe_data.get_indicator(tf, f"EMA_{self.ema_period}")
             
-            # Detect reclamations
-            recl_data = detect_reclamations(tf_data, tf)
-            
-            # Store reclamation data
-            reclamations[tf] = recl_data
-            
-            if recl_data.get('reclaimed_up', False) or recl_data.get('reclaimed_down', False):
-                logger.info(f"Reclamation detected on {tf}: {recl_data}")
+            if tf_data is not None and not tf_data.empty:
+                # Use ReclamationDetector class
+                detector = ReclamationDetector(ema_period=self.ema_period)
+                recl_data = detector.detect_reclamation(tf_data, ema=ema_data)
+                
+                if not recl_data.empty:
+                    reclamation_data[tf] = recl_data
+                    logger.info(f"Detected reclamations for {tf} timeframe")
         
-        return reclamations
+        return reclamation_data
     
     def validate_signals(self, reclamations, extensions):
         """
@@ -249,19 +253,21 @@ class SignalGenerator:
         
         return signals
 
-def generate_signals(timeframe_data):
+def generate_signals(timeframe_data, ema_period=9):
     """
-    Generate trading signals for the Multi-Timeframe 9 EMA Extension Strategy
+    Generate signals using the SignalGenerator
     
     Parameters:
     -----------
     timeframe_data : TimeframeData
         Multi-timeframe data
+    ema_period : int
+        EMA period to use for strategy calculations (default: 9)
         
     Returns:
     --------
-    list
-        List of validated trading signals
+    dict
+        Dictionary with signal information
     """
-    generator = SignalGenerator(timeframe_data)
+    generator = SignalGenerator(timeframe_data, ema_period)
     return generator.generate_signals() 

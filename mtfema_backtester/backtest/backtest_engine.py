@@ -16,7 +16,7 @@ from copy import deepcopy
 
 from mtfema_backtester.data.timeframe_data import TimeframeData
 from mtfema_backtester.strategy.extension_detector import detect_extensions
-from mtfema_backtester.strategy.reclamation_detector import detect_reclamations
+from mtfema_backtester.strategy.reclamation_detector import ReclamationDetector
 from mtfema_backtester.strategy.pullback_validator import validate_pullback
 from mtfema_backtester.strategy.target_manager import get_target_for_signal
 from mtfema_backtester.strategy.conflict_resolver import validate_signal_context
@@ -700,7 +700,13 @@ class BacktestEngine:
                 'win_rate': 0,
                 'profit_factor': 0,
                 'max_drawdown': 0,
-                'sharpe_ratio': 0
+                'sharpe_ratio': 0,
+                'sortino_ratio': 0,
+                'calmar_ratio': 0,
+                'omega_ratio': 0,
+                'gain_to_pain': 0,
+                'avg_holding_period': 0,
+                'expectancy': 0
             }
             return
         
@@ -732,6 +738,72 @@ class BacktestEngine:
         else:
             sharpe_ratio = 0
         
+        # Sortino ratio (downside risk only)
+        if len(returns) > 1:
+            # Calculate downside returns (negative returns only)
+            downside_returns = returns[returns < 0]
+            if len(downside_returns) > 0:
+                downside_deviation = np.std(downside_returns)
+                sortino_ratio = np.sqrt(252) * np.mean(returns) / downside_deviation if downside_deviation > 0 else 0
+            else:
+                sortino_ratio = float('inf')  # No negative returns
+        else:
+            sortino_ratio = 0
+        
+        # Calmar ratio (return / max drawdown)
+        if max_drawdown > 0:
+            total_return = (equity_curve[-1] / equity_curve[0]) - 1
+            # Annualize the return (assuming daily data)
+            days = len(equity_curve)
+            annualized_return = ((1 + total_return) ** (252 / days)) - 1
+            calmar_ratio = annualized_return / (max_drawdown / 100.0)
+        else:
+            calmar_ratio = float('inf')  # No drawdown
+        
+        # Omega ratio
+        if len(returns) > 1:
+            # Define a threshold return (0 = breakeven)
+            threshold = 0
+            # Calculate positive and negative deviations from threshold
+            positive_returns = returns[returns > threshold] - threshold
+            negative_returns = threshold - returns[returns < threshold]
+            
+            # Calculate Omega ratio
+            if len(negative_returns) > 0 and np.sum(negative_returns) > 0:
+                omega_ratio = np.sum(positive_returns) / np.sum(negative_returns)
+            else:
+                omega_ratio = float('inf')  # No negative deviations
+        else:
+            omega_ratio = 0
+        
+        # Gain to pain ratio
+        if gross_loss > 0:
+            gain_to_pain = gross_profit / gross_loss
+        else:
+            gain_to_pain = float('inf')  # No losses
+        
+        # Average holding period (in days or bars)
+        if total_trades > 0:
+            # Calculate the holding period for each trade
+            holding_periods = []
+            for trade in self.trades:
+                if hasattr(trade, 'entry_time') and hasattr(trade, 'exit_time'):
+                    if isinstance(trade.entry_time, pd.Timestamp) and isinstance(trade.exit_time, pd.Timestamp):
+                        holding_period = (trade.exit_time - trade.entry_time).total_seconds() / (60 * 60 * 24)  # Convert to days
+                        holding_periods.append(holding_period)
+            
+            avg_holding_period = np.mean(holding_periods) if holding_periods else 0
+        else:
+            avg_holding_period = 0
+        
+        # Expectancy (average profit/loss per trade)
+        if total_trades > 0:
+            avg_win = gross_profit / winning_trades if winning_trades > 0 else 0
+            avg_loss = -gross_loss / losing_trades if losing_trades > 0 else 0
+            expectancy = (win_rate * avg_win) - ((1 - win_rate) * avg_loss)
+        else:
+            expectancy = 0
+        
         # Store metrics
         self.metrics = {
             'total_trades': total_trades,
@@ -744,6 +816,12 @@ class BacktestEngine:
             'profit_factor': profit_factor,
             'max_drawdown': max_drawdown,
             'sharpe_ratio': sharpe_ratio,
+            'sortino_ratio': sortino_ratio,
+            'calmar_ratio': calmar_ratio,
+            'omega_ratio': omega_ratio,
+            'gain_to_pain': gain_to_pain,
+            'avg_holding_period': avg_holding_period,
+            'expectancy': expectancy,
             'average_trade': (gross_profit - gross_loss) / total_trades if total_trades > 0 else 0,
             'average_winner': gross_profit / winning_trades if winning_trades > 0 else 0,
             'average_loser': -gross_loss / losing_trades if losing_trades > 0 else 0,

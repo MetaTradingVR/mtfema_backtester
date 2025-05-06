@@ -56,14 +56,16 @@ def calculate_ema(data, period=9, column='Close'):
         logger.error(f"Error calculating EMA: {str(e)}")
         return pd.Series()
 
-def detect_9ema_extension(data, threshold=0.01, column='Close'):
+def detect_9ema_extension(data, ema_period=9, threshold=0.01, column='Close'):
     """
-    Detect if price is extended from 9 EMA
+    Detect if price is extended from EMA
     
     Parameters:
     -----------
     data : pandas.DataFrame
         Price data with OHLCV columns
+    ema_period : int
+        EMA period (default: 9)
     threshold : float
         Extension threshold as percentage (0.01 = 1%)
     column : str
@@ -71,12 +73,12 @@ def detect_9ema_extension(data, threshold=0.01, column='Close'):
         
     Returns:
     --------
-    dict
-        Extension detection results
+    tuple
+        (ema_series, extension_series, signals_dict)
     """
     if data is None or data.empty:
         logger.warning("Empty data provided for extension detection")
-        return {
+        return pd.Series(), pd.Series(), {
             'has_extension': False,
             'extended_up': False,
             'extended_down': False,
@@ -84,34 +86,37 @@ def detect_9ema_extension(data, threshold=0.01, column='Close'):
         }
     
     try:
-        # Calculate 9 EMA
-        ema9 = calculate_ema(data, period=9, column=column)
+        # Calculate EMA
+        ema_series = calculate_ema(data, period=ema_period, column=column)
+        
+        # Calculate extension percentage
+        extension_pct = (data[column] - ema_series) / ema_series * 100.0
         
         # Get the latest values
         latest_price = data[column].iloc[-1]
-        latest_ema = ema9.iloc[-1]
-        
-        # Calculate percentage difference
-        percentage_diff = (latest_price - latest_ema) / latest_ema
+        latest_ema = ema_series.iloc[-1]
+        latest_extension = extension_pct.iloc[-1]
         
         # Determine extension
-        extended_up = percentage_diff > threshold
-        extended_down = percentage_diff < -threshold
+        extended_up = latest_extension > threshold * 100
+        extended_down = latest_extension < -threshold * 100
         has_extension = extended_up or extended_down
         
-        return {
+        signals = {
             'has_extension': has_extension,
             'extended_up': extended_up,
             'extended_down': extended_down,
-            'extension_percentage': abs(percentage_diff) * 100.0,
+            'extension_percentage': abs(latest_extension),
             'price': latest_price,
             'ema': latest_ema,
-            'percentage_diff': percentage_diff * 100.0
+            'percentage_diff': latest_extension
         }
+        
+        return ema_series, extension_pct, signals
     
     except Exception as e:
         logger.error(f"Error detecting EMA extension: {str(e)}")
-        return {
+        return pd.Series(), pd.Series(), {
             'has_extension': False,
             'extended_up': False,
             'extended_down': False,

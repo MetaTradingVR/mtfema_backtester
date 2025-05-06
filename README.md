@@ -25,15 +25,53 @@ A professional backtesting platform for the Multi-Timeframe 9 EMA Extension Stra
 
 ## Installation
 
+### Standard Installation
+
 ```bash
 # Clone the repository
-git clone https://github.com/MetaTradingVR/mtfema_backtester.git
+git clone https://github.com/username/mtfema_backtester.git
 cd mtfema_backtester
 
+# Create a virtual environment
+python -m venv venv
+source venv/bin/activate  # On Windows: venv\Scripts\activate
+
 # Install dependencies
-python talib_installer.py  # Installs TA-Lib with appropriate wheel for your system
 pip install -r requirements.txt
+
+# Install TA-Lib (optional but recommended)
+# See https://github.com/mrjbq7/ta-lib for platform-specific instructions
 ```
+
+### Docker Installation
+
+```bash
+# Build and run the Docker container
+docker-compose up -d
+
+# Run commands inside the container
+docker exec mtfema python -m mtfema_backtester.main --help
+```
+
+## Using Docker
+
+For a hassle-free setup that avoids dependency issues, you can use Docker to run the backtester:
+
+```bash
+# Windows
+run-docker-backtest.bat --symbol NQ --timeframes 1d,1h,15m --start-date 2023-01-01 --end-date 2023-06-01
+
+# Linux/Mac
+./run-docker-backtest.sh --symbol NQ --timeframes 1d,1h,15m --start-date 2023-01-01 --end-date 2023-06-01
+```
+
+The Docker setup provides:
+- An isolated environment with all dependencies pre-installed
+- Consistent results across different systems
+- Volume mounts for data, results, and logs
+- Easy customization through command line parameters
+
+You can also customize the Docker settings in `docker-compose.yml` for advanced configurations.
 
 ## Quick Start
 
@@ -182,4 +220,49 @@ The project has successfully implemented the following enhancements:
 
 ## Acknowledgements
 
-This project was created with the help of Claude AI. 
+This project was created with the help of Claude AI.
+
+## Advanced Metrics
+
+The backtester calculates a comprehensive set of performance metrics:
+
+### Standard Metrics
+- **Total Return**: Overall percentage return
+- **Win Rate**: Percentage of profitable trades
+- **Profit Factor**: Gross profits divided by gross losses
+- **Max Drawdown**: Maximum peak-to-trough decline
+
+### Advanced Risk-Adjusted Metrics
+- **Sharpe Ratio**: Return relative to risk (volatility)
+- **Sortino Ratio**: Downside risk-adjusted return
+- **Calmar Ratio**: Return relative to maximum drawdown
+- **Omega Ratio**: Probability-weighted ratio of gains to losses
+- **Maximum Consecutive Winners/Losers**: Streak analysis
+
+### Trade Quality Metrics
+- **Average Winner/Loser Size**: Analysis of trade size distribution
+- **Gain-to-Pain Ratio**: Sum of returns divided by absolute sum of losses
+- **Average Holding Period**: Time in market analysis
+- **Expectancy**: Average profit/loss per trade
+
+## Project Structure
+
+```
+mtfema_backtester/
+├── backtest/           # Backtesting engine
+├── data/               # Data handling modules
+├── indicators/         # Technical indicators
+├── strategy/           # Strategy components
+├── utils/              # Utility functions
+├── visualization/      # Plotting and visualization
+├── main.py             # Main entry point
+└── config.py           # Configuration parameters
+```
+
+## Contributing
+
+Contributions are welcome! Please feel free to submit a Pull Request.
+
+## License
+
+This project is licensed under the MIT License - see the LICENSE file for details. 

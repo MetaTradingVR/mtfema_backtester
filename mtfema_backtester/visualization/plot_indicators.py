@@ -19,8 +19,8 @@ def plot_ema_extension(data, ema, extension, signals=None, title="9 EMA Extensio
         EMA values
     extension : pandas.Series
         Extension percentage values
-    signals : pandas.Series, optional
-        Binary signal series (1 for extended, 0 for not)
+    signals : dict or pandas.Series, optional
+        Either a dictionary with signal information or a binary signal series
     title : str, optional
         Plot title
         
@@ -106,34 +106,63 @@ def plot_ema_extension(data, ema, extension, signals=None, title="9 EMA Extensio
         )
         
         # Add signals if provided
-        if signals is not None and not signals.empty:
-            # Find extended up points
-            extended_up = data[signals == 1].index
-            if len(extended_up) > 0:
-                fig.add_trace(
-                    go.Scatter(
-                        x=extended_up,
-                        y=data.loc[extended_up, 'High'] * 1.005,  # Place markers slightly above highs
-                        mode='markers',
-                        marker=dict(symbol='triangle-down', size=10, color='green'),
-                        name='Extended Up'
-                    ),
-                    row=1, col=1
-                )
-            
-            # Find extended down points
-            extended_down = data[signals == -1].index
-            if len(extended_down) > 0:
-                fig.add_trace(
-                    go.Scatter(
-                        x=extended_down,
-                        y=data.loc[extended_down, 'Low'] * 0.995,  # Place markers slightly below lows
-                        mode='markers',
-                        marker=dict(symbol='triangle-up', size=10, color='red'),
-                        name='Extended Down'
-                    ),
-                    row=1, col=1
-                )
+        if signals is not None:
+            if isinstance(signals, dict):
+                # Handle dictionary signals (from detect_9ema_extension)
+                if signals.get('extended_up', False):
+                    # Add a single marker at the last point
+                    fig.add_trace(
+                        go.Scatter(
+                            x=[data.index[-1]],
+                            y=[data['High'].iloc[-1] * 1.005],
+                            mode='markers',
+                            marker=dict(symbol='triangle-down', size=10, color='green'),
+                            name='Extended Up'
+                        ),
+                        row=1, col=1
+                    )
+                
+                if signals.get('extended_down', False):
+                    # Add a single marker at the last point
+                    fig.add_trace(
+                        go.Scatter(
+                            x=[data.index[-1]],
+                            y=[data['Low'].iloc[-1] * 0.995],
+                            mode='markers',
+                            marker=dict(symbol='triangle-up', size=10, color='red'),
+                            name='Extended Down'
+                        ),
+                        row=1, col=1
+                    )
+            else:
+                # Handle Series signals
+                # Find extended up points
+                extended_up = data[signals == 1].index
+                if len(extended_up) > 0:
+                    fig.add_trace(
+                        go.Scatter(
+                            x=extended_up,
+                            y=data.loc[extended_up, 'High'] * 1.005,  # Place markers slightly above highs
+                            mode='markers',
+                            marker=dict(symbol='triangle-down', size=10, color='green'),
+                            name='Extended Up'
+                        ),
+                        row=1, col=1
+                    )
+                
+                # Find extended down points
+                extended_down = data[signals == -1].index
+                if len(extended_down) > 0:
+                    fig.add_trace(
+                        go.Scatter(
+                            x=extended_down,
+                            y=data.loc[extended_down, 'Low'] * 0.995,  # Place markers slightly below lows
+                            mode='markers',
+                            marker=dict(symbol='triangle-up', size=10, color='red'),
+                            name='Extended Down'
+                        ),
+                        row=1, col=1
+                    )
         
         # Update layout
         fig.update_layout(
@@ -166,7 +195,7 @@ def plot_bollinger_bands(data, bands, signals=None, title="Bollinger Bands Analy
     data : pandas.DataFrame
         OHLCV price data
     bands : pandas.DataFrame
-        DataFrame with Bollinger Bands (upper, middle, lower)
+        DataFrame with Bollinger Bands (Upper, Middle, Lower)
     signals : pandas.Series, optional
         Binary signal series (1 for breakout up, -1 for breakout down)
     title : str, optional
@@ -201,7 +230,7 @@ def plot_bollinger_bands(data, bands, signals=None, title="Bollinger Bands Analy
         fig.add_trace(
             go.Scatter(
                 x=data.index,
-                y=bands['middle'],
+                y=bands['Middle'],
                 line=dict(color='blue', width=1.5),
                 name='Middle Band (SMA)'
             )
@@ -210,7 +239,7 @@ def plot_bollinger_bands(data, bands, signals=None, title="Bollinger Bands Analy
         fig.add_trace(
             go.Scatter(
                 x=data.index,
-                y=bands['upper'],
+                y=bands['Upper'],
                 line=dict(color='green', width=1),
                 name='Upper Band'
             )
@@ -219,7 +248,7 @@ def plot_bollinger_bands(data, bands, signals=None, title="Bollinger Bands Analy
         fig.add_trace(
             go.Scatter(
                 x=data.index,
-                y=bands['lower'],
+                y=bands['Lower'],
                 line=dict(color='red', width=1),
                 name='Lower Band'
             )
@@ -229,7 +258,7 @@ def plot_bollinger_bands(data, bands, signals=None, title="Bollinger Bands Analy
         fig.add_trace(
             go.Scatter(
                 x=data.index.tolist() + data.index.tolist()[::-1],
-                y=bands['upper'].tolist() + bands['lower'].tolist()[::-1],
+                y=bands['Upper'].tolist() + bands['Lower'].tolist()[::-1],
                 fill='toself',
                 fillcolor='rgba(0,100,80,0.2)',
                 line=dict(color='rgba(255,255,255,0)'),
@@ -861,305 +890,3 @@ def plot_combined_strategy(data, indicators, signals, title="Combined Strategy")
         logger.error(f"Error creating combined strategy plot: {str(e)}")
         # Return simple empty figure on error
         return go.Figure()
-    """
-    Create a Plotly visualization for EMA extension analysis
-    
-    Parameters:
-    -----------
-    data : pandas.DataFrame
-        Price data with OHLCV columns
-    ema : pandas.Series
-        EMA values
-    extension : pandas.Series
-        Extension values from EMA
-    signals : pandas.Series, optional
-        Signal indicators for extension points
-    title : str
-        Plot title
-        
-    Returns:
-    --------
-    plotly.graph_objects.Figure
-        Interactive Plotly figure
-    """
-    # Create figure with secondary y-axis
-    fig = make_subplots(rows=2, cols=1, 
-                        shared_xaxes=True,
-                        vertical_spacing=0.05,
-                        row_heights=[0.7, 0.3],
-                        subplot_titles=(title, "Extension %"))
-    
-    # Add candlestick chart
-    fig.add_trace(
-        go.Candlestick(
-            x=data.index,
-            open=data['Open'],
-            high=data['High'],
-            low=data['Low'],
-            close=data['Close'],
-            name="Price"
-        ),
-        row=1, col=1
-    )
-    
-    # Add EMA
-    fig.add_trace(
-        go.Scatter(
-            x=ema.index,
-            y=ema,
-            name=ema.name,
-            line=dict(color='blue', width=2)
-        ),
-        row=1, col=1
-    )
-    
-    # Add extension percentage
-    fig.add_trace(
-        go.Scatter(
-            x=extension.index,
-            y=extension,
-            name="Extension %",
-            line=dict(color='purple', width=2)
-        ),
-        row=2, col=1
-    )
-    
-    # Add zero line for extension
-    fig.add_trace(
-        go.Scatter(
-            x=extension.index,
-            y=[0] * len(extension),
-            name="Zero Line",
-            line=dict(color='black', width=1, dash='dash')
-        ),
-        row=2, col=1
-    )
-    
-    # Add signals if provided
-    if signals is not None:
-        # Plot long signals
-        long_signals = signals[signals == 1]
-        if not long_signals.empty:
-            fig.add_trace(
-                go.Scatter(
-                    x=long_signals.index,
-                    y=data.loc[long_signals.index, 'Low'] * 0.99,  # Slightly below candle
-                    name="Long Signal",
-                    mode="markers",
-                    marker=dict(
-                        color='green',
-                        size=10,
-                        symbol='triangle-up'
-                    )
-                ),
-                row=1, col=1
-            )
-        
-        # Plot short signals
-        short_signals = signals[signals == -1]
-        if not short_signals.empty:
-            fig.add_trace(
-                go.Scatter(
-                    x=short_signals.index,
-                    y=data.loc[short_signals.index, 'High'] * 1.01,  # Slightly above candle
-                    name="Short Signal",
-                    mode="markers",
-                    marker=dict(
-                        color='red',
-                        size=10,
-                        symbol='triangle-down'
-                    )
-                ),
-                row=1, col=1
-            )
-    
-    # Update layout
-    fig.update_layout(
-        title=title,
-        xaxis_title="Date",
-        yaxis_title="Price",
-        xaxis_rangeslider_visible=False,
-        height=800,
-        width=1200,
-        legend=dict(
-            orientation="h",
-            yanchor="bottom",
-            y=1.02,
-            xanchor="right",
-            x=1
-        )
-    )
-    
-    # Update y-axes labels
-    fig.update_yaxes(title_text="Price", row=1, col=1)
-    fig.update_yaxes(title_text="Extension %", row=2, col=1)
-    
-    logger.info(f"Created EMA extension plot with title: {title}")
-    return fig
-
-def plot_bollinger_bands(data, bb, signals=None, title="Bollinger Bands Analysis"):
-    """
-    Create a Plotly visualization for Bollinger Bands analysis
-    
-    Parameters:
-    -----------
-    data : pandas.DataFrame
-        Price data with OHLCV columns
-    bb : pandas.DataFrame
-        Bollinger Bands data with Upper, Middle, Lower bands
-    signals : pandas.Series, optional
-        Signal indicators for breakouts
-    title : str
-        Plot title
-        
-    Returns:
-    --------
-    plotly.graph_objects.Figure
-        Interactive Plotly figure
-    """
-    # Create figure with secondary y-axis
-    fig = make_subplots(rows=2, cols=1, 
-                        shared_xaxes=True, 
-                        vertical_spacing=0.05,
-                        row_heights=[0.7, 0.3],
-                        subplot_titles=(title, "Bandwidth & %B"))
-    
-    # Add candlestick chart
-    fig.add_trace(
-        go.Candlestick(
-            x=data.index,
-            open=data['Open'],
-            high=data['High'],
-            low=data['Low'],
-            close=data['Close'],
-            name="Price"
-        ),
-        row=1, col=1
-    )
-    
-    # Add Bollinger Bands
-    for band_name, color in [
-        ('BB_Upper', 'rgba(173, 204, 255, 0.8)'),
-        ('BB_Middle', 'rgba(0, 0, 255, 0.8)'),
-        ('BB_Lower', 'rgba(173, 204, 255, 0.8)')
-    ]:
-        fig.add_trace(
-            go.Scatter(
-                x=bb.index,
-                y=bb[band_name],
-                name=band_name,
-                line=dict(color=color, width=2)
-            ),
-            row=1, col=1
-        )
-    
-    # Fill between upper and lower bands
-    fig.add_trace(
-        go.Scatter(
-            x=bb.index.tolist() + bb.index.tolist()[::-1],
-            y=bb['BB_Upper'].tolist() + bb['BB_Lower'].tolist()[::-1],
-            fill='toself',
-            fillcolor='rgba(173, 204, 255, 0.2)',
-            line=dict(color='rgba(255, 255, 255, 0)'),
-            hoverinfo="skip",
-            showlegend=False
-        ),
-        row=1, col=1
-    )
-    
-    # Add bandwidth
-    fig.add_trace(
-        go.Scatter(
-            x=bb.index,
-            y=bb['BB_Width'],
-            name="Bandwidth",
-            line=dict(color='blue', width=2)
-        ),
-        row=2, col=1
-    )
-    
-    # Add %B
-    fig.add_trace(
-        go.Scatter(
-            x=bb.index,
-            y=bb['BB_PercentB'],
-            name="%B",
-            line=dict(color='purple', width=2)
-        ),
-        row=2, col=1
-    )
-    
-    # Add reference lines for %B
-    for level, dash in [(0, 'dash'), (0.5, 'dot'), (1, 'dash')]:
-        fig.add_trace(
-            go.Scatter(
-                x=bb.index,
-                y=[level] * len(bb),
-                name=f"{level} Line",
-                line=dict(color='gray', width=1, dash=dash),
-                showlegend=(level == 0.5)  # Only show middle line in legend
-            ),
-            row=2, col=1
-        )
-    
-    # Add signals if provided
-    if signals is not None:
-        # Plot upper band breakouts
-        upper_breaks = signals[signals == 1]
-        if not upper_breaks.empty:
-            fig.add_trace(
-                go.Scatter(
-                    x=upper_breaks.index,
-                    y=data.loc[upper_breaks.index, 'High'] * 1.01,
-                    name="Upper Breakout",
-                    mode="markers",
-                    marker=dict(
-                        color='green',
-                        size=10,
-                        symbol='circle'
-                    )
-                ),
-                row=1, col=1
-            )
-        
-        # Plot lower band breakouts
-        lower_breaks = signals[signals == -1]
-        if not lower_breaks.empty:
-            fig.add_trace(
-                go.Scatter(
-                    x=lower_breaks.index,
-                    y=data.loc[lower_breaks.index, 'Low'] * 0.99,
-                    name="Lower Breakout",
-                    mode="markers",
-                    marker=dict(
-                        color='red',
-                        size=10,
-                        symbol='circle'
-                    )
-                ),
-                row=1, col=1
-            )
-    
-    # Update layout
-    fig.update_layout(
-        title=title,
-        xaxis_title="Date",
-        yaxis_title="Price",
-        xaxis_rangeslider_visible=False,
-        height=800,
-        width=1200,
-        legend=dict(
-            orientation="h",
-            yanchor="bottom",
-            y=1.02,
-            xanchor="right",
-            x=1
-        )
-    )
-    
-    # Update y-axes labels
-    fig.update_yaxes(title_text="Price", row=1, col=1)
-    fig.update_yaxes(title_text="Value", row=2, col=1)
-    
-    logger.info(f"Created Bollinger Bands plot with title: {title}")
-    return fig

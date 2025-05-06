@@ -495,10 +495,11 @@ def main():
         
         # Try to test more components if available
         try:
-            from mtfema_backtester.strategy.reclamation_detector import detect_reclamations
+            from mtfema_backtester.strategy.reclamation_detector import ReclamationDetector
             print("\n=== Testing Reclamation Detector ===")
+            detector = ReclamationDetector()
             for tf, data in data_with_indicators.items():
-                recl_data = detect_reclamations(data, tf)
+                recl_data = detector.detect_reclamation(data, tf)
                 reclamation_results[tf] = recl_data
                 print(f"\nReclamations for {tf}:")
                 for key, value in recl_data.items():
