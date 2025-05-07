@@ -1,503 +1,179 @@
 """
-Conflict Resolver for the Multi-Timeframe 9 EMA Extension Strategy.
+Conflict resolver for the Multi-Timeframe 9 EMA Extension Strategy Backtester.
 
-This module handles the resolution of conflicts between different timeframes,
-particularly when extensions and reclamations occur in opposite directions.
+This module detects and resolves conflicts between different timeframes
+to adjust trade parameters and risk accordingly.
 """
 
 import logging
 import pandas as pd
 import numpy as np
 
-from mtfema_backtester.config import STRATEGY_PARAMS
+from mtfema_backtester.utils.timeframe_utils import (
+    get_timeframe_minutes, 
+    map_timestamp_to_higher_timeframe
+)
 
 logger = logging.getLogger(__name__)
 
-# Define conflict types
+# Conflict types
 class ConflictType:
-    NO_CONFLICT = "no_conflict"  # No conflict detected
-    CONSOLIDATION = "consolidation"  # Higher TF extended, lower TF around EMA
-    DIRECT_CORRECTION = "direct_correction"  # TFs extended in opposite directions
-    TRAP_SETUP = "trap_setup"  # Reclamation against prevailing higher TF extension
+    """Enum-like class for conflict types"""
+    NO_CONFLICT = "NoConflict"
+    DIRECT_CORRECTION = "DirectCorrection"
+    TRAP_SETUP = "TrapSetup"
+    CONSOLIDATION = "Consolidation"
+    NO_DATA = "NoData"
+    DATA_ERROR = "DataError"
 
-class ConflictResolver:
+def check_timeframe_conflict(timeframe_data, current_tf, higher_tf, timestamp):
     """
-    Resolves conflicts between multiple timeframes for the strategy.
+    Check for conflicts between current and higher timeframe.
     
-    Timestamp: 2025-05-06 PST
-    Reference: See 'Multi-Timeframe Conflict Resolution Logic' in strategy_playbook.md (Section 5)
-    
-    This class implements the conflict detection and resolution logic for handling discrepancies
-    between signals on different timeframes. It follows the approach outlined in the playbook
-    for consolidation, direct correction, and trap setup scenarios.
+    Args:
+        timeframe_data: TimeframeData instance with indicator data
+        current_tf: Current timeframe string
+        higher_tf: Higher timeframe string
+        timestamp: Timestamp to check
+        
+    Returns:
+        str: Conflict type (see ConflictType class)
     """
+    # Get extension data
+    current_ext = timeframe_data.get_indicator(current_tf, "ExtensionSignal")
+    higher_ext = timeframe_data.get_indicator(higher_tf, "ExtensionSignal")
     
-    def __init__(self, 
-                 prioritize_higher_timeframe=None, 
-                 minimum_agreement=None,
-                 timeframe_weights=None):
-        """
-        Initialize the ConflictResolver
-        
-        Parameters:
-        -----------
-        prioritize_higher_timeframe : bool, optional
-            Whether to prioritize higher timeframe signals over lower timeframes
-        minimum_agreement : int, optional
-            Minimum number of timeframes that must agree for valid signals
-        timeframe_weights : dict, optional
-            Weights for each timeframe in decision making
-        """
-        # Use provided values or defaults from config
-        self.prioritize_higher_timeframe = prioritize_higher_timeframe
-        if self.prioritize_higher_timeframe is None:
-            self.prioritize_higher_timeframe = STRATEGY_PARAMS['conflict_resolution']['prioritize_higher_timeframe']
-            
-        self.minimum_agreement = minimum_agreement
-        if self.minimum_agreement is None:
-            self.minimum_agreement = STRATEGY_PARAMS['conflict_resolution']['minimum_agreement']
-            
-        self.timeframe_weights = timeframe_weights
-        if self.timeframe_weights is None:
-            self.timeframe_weights = STRATEGY_PARAMS['timeframe_weights']
-        
-        logger.info(f"ConflictResolver initialized with prioritize_higher_timeframe={self.prioritize_higher_timeframe}, "
-                   f"minimum_agreement={self.minimum_agreement}")
+    if current_ext is None or higher_ext is None:
+        logger.warning(f"Missing extension data for conflict check: current_tf={current_tf}, higher_tf={higher_tf}")
+        return ConflictType.NO_DATA
     
-    def detect_conflict(self, higher_tf_data, lower_tf_data):
-        """
-        Detect conflict between two timeframes.
+    # Get current values
+    current_idx = timestamp
+    higher_idx = map_timestamp_to_higher_timeframe(timestamp, current_tf, higher_tf)
+    
+    try:
+        # Check if both have extensions but in opposite directions
+        current_has_extension = _get_value(current_ext, current_idx, 'has_extension', False)
+        higher_has_extension = _get_value(higher_ext, higher_idx, 'has_extension', False)
         
-        Timestamp: 2025-05-06 PST
-        Reference: See 'Conflict Types' and 'Resolution Logic' in strategy_playbook.md (Section 5.1, 5.2)
-        
-        Parameters:
-        -----------
-        higher_tf_data : dict
-            Data for higher timeframe with extension info.
-            Required keys: 'has_extension', 'extended_up', 'extended_down'
-        lower_tf_data : dict
-            Data for lower timeframe with extension info.
-            Required keys: 'has_extension', 'extended_up', 'extended_down', 'reclaimed_up', 'reclaimed_down'
+        if current_has_extension and higher_has_extension:
+            current_up = _get_value(current_ext, current_idx, 'extended_up', False)
+            current_down = _get_value(current_ext, current_idx, 'extended_down', False)
+            higher_up = _get_value(higher_ext, higher_idx, 'extended_up', False)
+            higher_down = _get_value(higher_ext, higher_idx, 'extended_down', False)
             
-        Returns:
-        --------
-        str
-            Conflict type from ConflictType:
-            - NO_CONFLICT: No conflict detected
-            - CONSOLIDATION: Higher TF extended, lower TF around EMA
-            - DIRECT_CORRECTION: TFs extended in opposite directions
-            - TRAP_SETUP: Reclamation against prevailing higher TF extension
-            
-        Usage Example:
-        --------------
-        >>> resolver = ConflictResolver()
-        >>> conflict = resolver.detect_conflict(
-        ...     {'has_extension': True, 'extended_up': True, 'extended_down': False},
-        ...     {'has_extension': False, 'extended_up': False, 'extended_down': False, 
-        ...      'reclaimed_up': False, 'reclaimed_down': False}
-        ... )
-        >>> if conflict == ConflictType.CONSOLIDATION:
-        ...     print('Consolidation detected - lower TF ranging while higher TF extended')
-            
-        Edge Cases:
-        -----------
-        - Handles missing keys in input dictionaries using .get() with defaults.
-        - Returns NO_CONFLICT if the data does not match any conflict patterns.
-        """
-        # Extract extension info
-        higher_tf_extended = higher_tf_data.get('has_extension', False)
-        higher_tf_extended_up = higher_tf_data.get('extended_up', False)
-        higher_tf_extended_down = higher_tf_data.get('extended_down', False)
-        
-        lower_tf_extended = lower_tf_data.get('has_extension', False)
-        lower_tf_extended_up = lower_tf_data.get('extended_up', False)
-        lower_tf_extended_down = lower_tf_data.get('extended_down', False)
-        
-        lower_tf_reclaimed_up = lower_tf_data.get('reclaimed_up', False)
-        lower_tf_reclaimed_down = lower_tf_data.get('reclaimed_down', False)
-        
-        # Case 1: Higher TF extended but lower TF not extended (consolidation)
-        if higher_tf_extended and not lower_tf_extended:
-            return ConflictType.CONSOLIDATION
-        
-        # Case 2: Higher TF and lower TF extended in opposite directions
-        if higher_tf_extended and lower_tf_extended:
-            if (higher_tf_extended_up and lower_tf_extended_down) or \
-               (higher_tf_extended_down and lower_tf_extended_up):
+            if (current_up and higher_down) or (current_down and higher_up):
+                logger.info(f"Direct correction conflict detected: {current_tf} vs {higher_tf}")
                 return ConflictType.DIRECT_CORRECTION
         
-        # Case 3: Trap setup - reclamation against prevailing higher TF extension
-        if higher_tf_extended:
-            if (higher_tf_extended_up and lower_tf_reclaimed_down) or \
-               (higher_tf_extended_down and lower_tf_reclaimed_up):
-                return ConflictType.TRAP_SETUP
+        # Check for trap setup
+        if higher_has_extension and not current_has_extension:
+            # Check reclamation in lower timeframe
+            reclamation = timeframe_data.get_indicator(current_tf, "Reclamation")
+            if reclamation is not None:
+                has_bullish_reclaim = _get_value(reclamation, current_idx, 'BullishReclaim', False)
+                has_bearish_reclaim = _get_value(reclamation, current_idx, 'BearishReclaim', False)
+                
+                if has_bullish_reclaim or has_bearish_reclaim:
+                    logger.info(f"Trap setup detected: {current_tf} reclamation against {higher_tf} extension")
+                    return ConflictType.TRAP_SETUP
+                
+            logger.info(f"Consolidation detected: {higher_tf} extended but {current_tf} not extended")
+            return ConflictType.CONSOLIDATION
         
-        # No conflict detected
+        logger.debug(f"No conflict detected between {current_tf} and {higher_tf}")
         return ConflictType.NO_CONFLICT
-    
-    def resolve_conflict(self, conflict_type, signal, risk_params):
-        """
-        Resolve conflict by adjusting signal parameters and risk levels.
         
-        Timestamp: 2025-05-06 PST
-        Reference: See 'Resolution Logic' in strategy_playbook.md (Section 5.2)
-        
-        Parameters:
-        -----------
-        conflict_type : str
-            Conflict type from ConflictType.
-        signal : dict
-            Signal information to be adjusted (position details, targets, etc.).
-        risk_params : dict
-            Risk parameters to be adjusted (max risk, position sizing, etc.).
-            
-        Returns:
-        --------
-        tuple
-            (adjusted_signal, adjusted_risk_params) with modified values based on conflict:
-            - TRAP_SETUP: 50% risk reduction, limited progression, low confidence
-            - DIRECT_CORRECTION: 50% risk reduction, medium confidence
-            - CONSOLIDATION: Standard risk, breakout monitoring, medium confidence
-            - NO_CONFLICT: No adjustments
-            
-        Usage Example:
-        --------------
-        >>> resolver = ConflictResolver()
-        >>> conflict = resolver.detect_conflict(higher_tf_data, lower_tf_data)
-        >>> signal = {'direction': 'long', 'entry_price': 100.0}
-        >>> risk = {'max_risk_per_trade': 1.0}
-        >>> adjusted_signal, adjusted_risk = resolver.resolve_conflict(conflict, signal, risk)
-        >>> if adjusted_signal['confidence'] == 'low':
-        ...     print('Caution: Low confidence trade due to timeframe conflict')
-            
-        Edge Cases:
-        -----------
-        - Creates copies of input dictionaries to avoid modifying originals.
-        - Handles unknown conflict types by returning unmodified inputs.
-        - All logic branches should be unit tested (see tests/strategy/test_conflict_resolver.py).
-        """
-        # Create copies to avoid modifying originals
-        signal_copy = signal.copy()
-        risk_params_copy = risk_params.copy()
-        
-        if conflict_type == ConflictType.NO_CONFLICT:
-            # No adjustments needed
-            return signal_copy, risk_params_copy
-        
-        elif conflict_type == ConflictType.TRAP_SETUP:
-            # Trap setup - reduce risk and tighten targets
-            logger.info(f"Resolving TRAP_SETUP conflict by reducing risk and tightening targets")
-            
-            # Reduce risk by 50%
-            risk_params_copy['max_risk_per_trade'] = risk_params['max_risk_per_trade'] * 0.5
-            
-            # Tighter target - only target next timeframe
-            signal_copy['max_progression_level'] = 1  # Limit to one progression
-            
-            # Add confidence measure
-            signal_copy['confidence'] = 'low'
-            signal_copy['conflict_resolution'] = 'trap_setup_adjustment'
-            
-            return signal_copy, risk_params_copy
-        
-        elif conflict_type == ConflictType.DIRECT_CORRECTION:
-            # Direct correction - reduce risk and prepare for counter-trend
-            logger.info(f"Resolving DIRECT_CORRECTION conflict by reducing risk")
-            
-            # Reduce risk by 50%
-            risk_params_copy['max_risk_per_trade'] = risk_params['max_risk_per_trade'] * 0.5
-            
-            # Add confidence measure
-            signal_copy['confidence'] = 'medium'
-            signal_copy['conflict_resolution'] = 'direct_correction_adjustment'
-            
-            return signal_copy, risk_params_copy
-        
-        elif conflict_type == ConflictType.CONSOLIDATION:
-            # Consolidation - maintain standard risk but watch for breakout
-            logger.info(f"Resolving CONSOLIDATION conflict - standard risk, watching for breakout")
-            
-            # Standard risk, add note for monitoring
-            signal_copy['monitor_for_breakout'] = True
-            signal_copy['confidence'] = 'medium'
-            signal_copy['conflict_resolution'] = 'consolidation_monitoring'
-            
-            return signal_copy, risk_params_copy
-        
-        # Default fallback
-        return signal_copy, risk_params_copy
-    
-    def check_timeframe_agreement(self, extensions_by_timeframe, direction):
-        """
-        Check agreement across timeframes for a particular direction
-        
-        Parameters:
-        -----------
-        extensions_by_timeframe : dict
-            Dictionary with extension data for each timeframe
-        direction : str
-            Direction to check agreement for ('long' or 'short')
-            
-        Returns:
-        --------
-        tuple
-            (agreement_count, agreement_ratio, weighted_agreement)
-        """
-        is_long = direction == 'long'
-        
-        # Count agreements and calculate weighted agreement
-        agreement_count = 0
-        weighted_agreement = 0
-        total_weight = 0
-        
-        for tf, ext_data in extensions_by_timeframe.items():
-            # Get timeframe weight
-            tf_weight = self.timeframe_weights.get(tf, 1.0)
-            total_weight += tf_weight
-            
-            # Check for agreement based on direction
-            if is_long and ext_data.get('extended_down', False):
-                agreement_count += 1
-                weighted_agreement += tf_weight
-            elif not is_long and ext_data.get('extended_up', False):
-                agreement_count += 1
-                weighted_agreement += tf_weight
-        
-        # Calculate agreement ratio
-        total_timeframes = len(extensions_by_timeframe)
-        agreement_ratio = agreement_count / total_timeframes if total_timeframes > 0 else 0
-        
-        # Normalize weighted agreement
-        weighted_agreement = weighted_agreement / total_weight if total_weight > 0 else 0
-        
-        return agreement_count, agreement_ratio, weighted_agreement
-    
-    def validate_signal_against_context(self, signal, extensions_by_timeframe):
-        """
-        Validate a signal against the multi-timeframe context
-        
-        Parameters:
-        -----------
-        signal : dict
-            Signal information
-        extensions_by_timeframe : dict
-            Dictionary with extension data for each timeframe
-            
-        Returns:
-        --------
-        dict
-            Validation result with confidence score
-        """
-        # Get signal timeframe and direction
-        tf = signal['timeframe']
-        direction = signal['direction']
-        
-        # Get timeframes in order of size
-        all_timeframes = list(extensions_by_timeframe.keys())
-        
-        # Sort timeframes by duration (assuming timeframe names can be converted to minutes)
-        try:
-            tf_minutes = {t: self._parse_timeframe_minutes(t) for t in all_timeframes}
-            sorted_timeframes = sorted(all_timeframes, key=lambda t: tf_minutes[t])
-        except:
-            # Fallback if parsing fails
-            sorted_timeframes = all_timeframes
-        
-        # Find position of signal timeframe in hierarchy
-        try:
-            tf_idx = sorted_timeframes.index(tf)
-        except ValueError:
-            logger.warning(f"Signal timeframe {tf} not found in available timeframes")
-            tf_idx = -1
-        
-        # Get higher and lower timeframes
-        higher_tfs = sorted_timeframes[tf_idx+1:] if tf_idx >= 0 and tf_idx < len(sorted_timeframes) - 1 else []
-        lower_tfs = sorted_timeframes[:tf_idx] if tf_idx > 0 else []
-        
-        # Check agreement with higher timeframes
-        higher_agreement_count = 0
-        higher_conflicts = 0
-        
-        for htf in higher_tfs:
-            htf_data = extensions_by_timeframe.get(htf, {})
-            
-            # Check for agreement based on direction
-            if direction == 'long':
-                if htf_data.get('extended_down', False):
-                    higher_agreement_count += 1
-                elif htf_data.get('extended_up', False):
-                    higher_conflicts += 1
-            else:  # short
-                if htf_data.get('extended_up', False):
-                    higher_agreement_count += 1
-                elif htf_data.get('extended_down', False):
-                    higher_conflicts += 1
-        
-        # Calculate overall agreement across all timeframes
-        agreement_count, agreement_ratio, weighted_agreement = self.check_timeframe_agreement(
-            extensions_by_timeframe, direction
-        )
-        
-        # Set confidence based on agreement
-        confidence = 'low'
-        if weighted_agreement >= 0.7:
-            confidence = 'high'
-        elif weighted_agreement >= 0.5:
-            confidence = 'medium'
-        
-        # Check if minimum agreement met
-        valid = agreement_count >= self.minimum_agreement
-        
-        # Adjust validity if prioritizing higher timeframes and there are conflicts
-        if self.prioritize_higher_timeframe and higher_conflicts > higher_agreement_count:
-            valid = False
-            confidence = 'very_low'
-        
-        # Prepare result
-        result = {
-            'valid': valid,
-            'confidence': confidence,
-            'agreement_count': agreement_count,
-            'agreement_ratio': agreement_ratio,
-            'weighted_agreement': weighted_agreement,
-            'higher_tf_agreement': higher_agreement_count,
-            'higher_tf_conflicts': higher_conflicts,
-            'signal_tf_position': tf_idx,
-            'higher_timeframes': higher_tfs,
-            'lower_timeframes': lower_tfs
-        }
-        
-        return result
-    
-    def detect_trend_break(self, data, ema_period=9, lookback=5):
-        """
-        Detect potential trend break in a timeframe
-        
-        Parameters:
-        -----------
-        data : pandas.DataFrame
-            Price data with OHLCV columns
-        ema_period : int
-            EMA period to use
-        lookback : int
-            Number of bars to look back
-            
-        Returns:
-        --------
-        dict
-            Trend break analysis result
-        """
-        # Ensure we have enough data
-        if len(data) < lookback + ema_period:
-            return {'trend_breaking': False, 'reason': 'Insufficient data'}
-        
-        # Get recent section of data
-        recent_data = data.iloc[-lookback:].copy()
-        
-        # Check if EMA is already calculated
-        ema_col = f'EMA_{ema_period}'
-        if ema_col not in recent_data.columns:
-            # Calculate EMA
-            try:
-                import talib
-                full_ema = pd.Series(talib.EMA(data['Close'].values, timeperiod=ema_period))
-                recent_ema = full_ema.iloc[-lookback:].values
-            except ImportError:
-                import pandas_ta as ta
-                full_ema = ta.ema(data['Close'], length=ema_period)
-                recent_ema = full_ema.iloc[-lookback:].values
-        else:
-            recent_ema = recent_data[ema_col].values
-        
-        # Determine if price was consistently above or below EMA
-        above_ema = recent_data['Close'].values > recent_ema
-        below_ema = recent_data['Close'].values < recent_ema
-        
-        # Check for potential trend break
-        was_uptrend = np.all(above_ema[:-3])  # Consistent uptrend in earlier bars
-        was_downtrend = np.all(below_ema[:-3])  # Consistent downtrend in earlier bars
-        
-        recent_cross_down = was_uptrend and below_ema[-1]
-        recent_cross_up = was_downtrend and above_ema[-1]
-        
-        trend_breaking = recent_cross_down or recent_cross_up
-        
-        # Return analysis
-        return {
-            'trend_breaking': trend_breaking,
-            'recent_cross_down': recent_cross_down,
-            'recent_cross_up': recent_cross_up,
-            'was_uptrend': was_uptrend,
-            'was_downtrend': was_downtrend
-        }
-    
-    def _parse_timeframe_minutes(self, timeframe):
-        """
-        Parse timeframe string to get minutes
-        
-        Parameters:
-        -----------
-        timeframe : str
-            Timeframe string (e.g., '1m', '1h', '1d')
-            
-        Returns:
-        --------
-        int
-            Minutes represented by the timeframe
-        """
-        try:
-            # Handle standard formats
-            if timeframe.endswith('m'):
-                return int(timeframe[:-1])
-            elif timeframe.endswith('h'):
-                return int(timeframe[:-1]) * 60
-            elif timeframe.endswith('d'):
-                return int(timeframe[:-1]) * 60 * 24
-            elif timeframe.endswith('w'):
-                return int(timeframe[:-1]) * 60 * 24 * 7
-            else:
-                # Try to parse as integer
-                return int(timeframe)
-        except (ValueError, AttributeError):
-            # Default to zero if parsing fails
-            logger.warning(f"Could not parse timeframe: {timeframe}")
-            return 0
+    except (KeyError, IndexError, TypeError) as e:
+        logger.error(f"Error checking timeframe conflict: {str(e)}")
+        return ConflictType.DATA_ERROR
 
-def resolve_timeframe_conflict(higher_tf_data, lower_tf_data):
+def adjust_risk_for_conflict(base_risk, conflict_type):
     """
-    Resolve conflict between two timeframes
+    Adjust risk percentage based on conflict type.
     
-    Parameters:
-    -----------
-    higher_tf_data : dict
-        Data for higher timeframe with extension info
-    lower_tf_data : dict
-        Data for lower timeframe with extension info
+    Args:
+        base_risk: Base risk percentage (e.g., 0.01 for 1%)
+        conflict_type: Type of conflict detected
         
     Returns:
-    --------
-    str
-        Conflict resolution type
+        float: Adjusted risk percentage
     """
-    resolver = ConflictResolver()
-    return resolver.detect_conflict(higher_tf_data, lower_tf_data)
-
-def validate_signal_context(signal, extensions_by_timeframe):
-    """
-    Validate a signal against multi-timeframe context
+    if conflict_type == ConflictType.DIRECT_CORRECTION:
+        # High-risk situation - reduce risk by 75%
+        return base_risk * 0.25
     
-    Parameters:
-    -----------
-    signal : dict
-        Signal information
-    extensions_by_timeframe : dict
-        Dictionary with extension data for each timeframe
+    elif conflict_type == ConflictType.TRAP_SETUP:
+        # Moderate-risk situation - reduce risk by 50%
+        return base_risk * 0.5
+    
+    elif conflict_type == ConflictType.CONSOLIDATION:
+        # Slightly higher risk - reduce risk by 25%
+        return base_risk * 0.75
+    
+    elif conflict_type in [ConflictType.DATA_ERROR, ConflictType.NO_DATA]:
+        # Uncertain situation - reduce risk by 50%
+        return base_risk * 0.5
+    
+    # No conflict or unknown - use base risk
+    return base_risk
+
+def get_target_for_timeframe(timeframe_data, target_tf, signal_type):
+    """
+    Get the target price for a specific timeframe.
+    
+    Args:
+        timeframe_data: TimeframeData instance
+        target_tf: Target timeframe string
+        signal_type: Signal type ('LONG' or 'SHORT')
         
     Returns:
-    --------
-    dict
-        Validation result
+        float: Target price, or None if not available
     """
-    resolver = ConflictResolver()
-    return resolver.validate_signal_against_context(signal, extensions_by_timeframe) 
+    # Get 9 EMA value for target timeframe
+    ema_data = timeframe_data.get_indicator(target_tf, "EMA_9")
+    if ema_data is None or ema_data.empty:
+        logger.warning(f"No EMA data available for target timeframe {target_tf}")
+        return None
+    
+    # Get the latest value
+    try:
+        latest_ema = ema_data.iloc[-1]
+        if isinstance(latest_ema, pd.Series):
+            latest_ema = latest_ema.iloc[0]
+        
+        logger.info(f"Target for {signal_type} on {target_tf}: {latest_ema}")
+        return float(latest_ema)
+    
+    except (IndexError, TypeError) as e:
+        logger.error(f"Error getting target for timeframe {target_tf}: {str(e)}")
+        return None
+
+def _get_value(df, idx, column, default=None):
+    """
+    Helper function to safely get value from DataFrame.
+    
+    Args:
+        df: DataFrame to get value from
+        idx: Index to get
+        column: Column name
+        default: Default value if not found
+        
+    Returns:
+        Value at df.loc[idx, column] or default if not found
+    """
+    try:
+        if idx not in df.index or column not in df.columns:
+            return default
+        
+        value = df.loc[idx, column]
+        
+        # Handle case where the value is a Series (handle MultiIndex)
+        if isinstance(value, pd.Series):
+            return value.iloc[0]
+        
+        return value
+    
+    except (KeyError, IndexError, TypeError) as e:
+        logger.debug(f"Error getting value at {idx}, {column}: {str(e)}")
+        return default 

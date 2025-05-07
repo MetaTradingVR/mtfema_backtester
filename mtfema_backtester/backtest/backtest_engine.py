@@ -1,865 +1,365 @@
 """
-Backtesting Engine for the Multi-Timeframe 9 EMA Extension Strategy
+Backtest engine for the Multi-Timeframe 9 EMA Extension Strategy Backtester.
 
-This module provides a comprehensive backtesting framework for evaluating 
-the Multi-Timeframe 9 EMA Extension Strategy across different instruments 
-and market conditions.
+This module handles trade simulation, execution, and tracking based on generated signals.
 """
 
-import os
-import numpy as np
 import pandas as pd
-from datetime import datetime
+import numpy as np
 import logging
-from tqdm import tqdm
-from copy import deepcopy
+from datetime import datetime
 
-from mtfema_backtester.data.timeframe_data import TimeframeData
-from mtfema_backtester.strategy.extension_detector import detect_extensions
-from mtfema_backtester.strategy.reclamation_detector import ReclamationDetector
-from mtfema_backtester.strategy.pullback_validator import validate_pullback
-from mtfema_backtester.strategy.target_manager import get_target_for_signal
-from mtfema_backtester.strategy.conflict_resolver import validate_signal_context
-from mtfema_backtester.strategy.signal_generator import generate_signals
-from mtfema_backtester.backtest.position import Position
-from mtfema_backtester.backtest.trade import Trade
-from mtfema_backtester.config import RISK_PARAMS, BACKTEST_CONFIG
+from mtfema_backtester.utils.timeframe_utils import get_next_timeframe_in_hierarchy
+from mtfema_backtester.strategy.conflict_resolver import (
+    check_timeframe_conflict, 
+    adjust_risk_for_conflict,
+    get_target_for_timeframe
+)
 
-logger = logging.getLogger('mtfema_backtester.backtest_engine')
+logger = logging.getLogger(__name__)
 
-class BacktestEngine:
+def execute_backtest(signals, timeframe_data, params):
     """
-    Backtesting engine for the Multi-Timeframe 9 EMA Extension Strategy
+    Execute backtest with generated signals.
+    
+    Args:
+        signals: DataFrame of trade signals
+        timeframe_data: TimeframeData instance with price data
+        params: Strategy parameters
+        
+    Returns:
+        tuple: (trades_df, final_balance, equity_curve)
     """
+    if signals.empty:
+        logger.warning("No signals to backtest")
+        return pd.DataFrame(), params.get_param('risk_management.initial_balance', 10000.0), pd.DataFrame()
     
-    def __init__(
-        self, 
-        timeframe_data,
-        initial_capital=BACKTEST_CONFIG['initial_capital'],
-        commission=BACKTEST_CONFIG['commission'],
-        slippage=BACKTEST_CONFIG['slippage'],
-        execution_delay=BACKTEST_CONFIG['execution_delay'],
-        enable_fractional_shares=BACKTEST_CONFIG['enable_fractional_shares']
-    ):
-        """
-        Initialize the backtesting engine
-        
-        Parameters:
-        -----------
-        timeframe_data : TimeframeData
-            Multi-timeframe data for backtesting
-        initial_capital : float
-            Initial account balance
-        commission : float
-            Commission per trade (percentage)
-        slippage : float
-            Slippage per trade (percentage)
-        execution_delay : int
-            Execution delay in bars
-        enable_fractional_shares : bool
-            Whether to allow fractional share positions
-        """
-        # Validate input
-        if not isinstance(timeframe_data, TimeframeData):
-            raise TypeError("timeframe_data must be a TimeframeData instance")
-        
-        # Store parameters
-        self.tf_data = timeframe_data
-        self.timeframes = self.tf_data.get_available_timeframes()
-        self.initial_capital = initial_capital
-        self.commission = commission
-        self.slippage = slippage
-        self.execution_delay = execution_delay
-        self.enable_fractional_shares = enable_fractional_shares
-        
-        # Initialize state variables
-        self.reset()
-        
-        logger.info(f"BacktestEngine initialized with {len(self.timeframes)} timeframes: {self.timeframes}")
+    # Initialize tracking variables
+    trades = []
+    account_balance = params.get_param('risk_management.initial_balance', 10000.0)
+    risk_pct = params.get_param('risk_management.account_risk_percent', 1.0) / 100.0
+    equity_points = [(signals.iloc[0]['datetime'], account_balance)]
     
-    def reset(self):
-        """Reset the backtest engine to initial state"""
-        # Account state
-        self.equity = [self.initial_capital]
-        self.balance = self.initial_capital
-        self.margin_used = 0
-        
-        # Trade tracking
-        self.positions = []
-        self.open_positions = []
-        self.closed_positions = []
-        self.trades = []
-        
-        # Current state
-        self.current_bar = {}
-        for tf in self.timeframes:
-            self.current_bar[tf] = 0
-        
-        # Performance metrics
-        self.metrics = {}
-        
-        logger.info("BacktestEngine reset to initial state")
+    # Get reference timeframe for context
+    reference_tf = params.get_param('timeframes.reference_timeframe', '4h')
     
-    def run(self, sync_timeframes=True):
-        """
-        Run the complete backtest
+    # Track active trades
+    active_trades = []
+    
+    # Process signals in chronological order
+    signals = signals.sort_values('datetime')
+    
+    for idx, signal in signals.iterrows():
+        # Skip signal if too many active trades
+        max_trades = params.get_param('risk_management.max_concurrent_trades', 3)
+        if len(active_trades) >= max_trades:
+            logger.info(f"Skipping signal at {signal['datetime']} due to max trades limit ({max_trades})")
+            continue
         
-        Parameters:
-        -----------
-        sync_timeframes : bool
-            Whether to synchronize timeframes (ensure they align)
+        # Skip signal if we already have a trade in this timeframe
+        if any(t['timeframe'] == signal['timeframe'] for t in active_trades):
+            logger.info(f"Skipping signal at {signal['datetime']} because we already have a trade in {signal['timeframe']}")
+            continue
+        
+        tf = signal['timeframe']
+        entry_time = signal['datetime']
+        signal_type = signal['type']  # 'LONG' or 'SHORT'
+        
+        # Get data for this timeframe
+        data = timeframe_data.get_timeframe(tf)
+        if data is None or data.empty:
+            logger.warning(f"No data available for timeframe {tf}")
+            continue
             
-        Returns:
-        --------
-        dict
-            Backtest results and performance metrics
-        """
-        logger.info("Starting backtest run")
+        # Check reference timeframe for conflicts
+        conflict_type = "None"
+        adjusted_risk = risk_pct
         
-        # Reset to initial state
-        self.reset()
-        
-        # Synchronize timeframes if requested
-        if sync_timeframes:
-            logger.info("Synchronizing timeframes...")
-            self.tf_data.synchronize_timeframes()
-        
-        # Get the reference timeframe (smallest timeframe)
-        ref_tf = min(self.timeframes, key=lambda x: self.tf_data.get_timeframe_minutes(x))
-        ref_data = self.tf_data.get_timeframe(ref_tf)
-        total_bars = len(ref_data)
-        
-        logger.info(f"Reference timeframe: {ref_tf} with {total_bars} bars")
-        
-        # Main backtesting loop
-        for i in tqdm(range(total_bars), desc="Backtesting progress"):
-            # Update current state for each timeframe
-            for tf in self.timeframes:
-                # Map reference timeframe index to this timeframe
-                tf_idx = self.tf_data.map_index_between_timeframes(ref_tf, i, tf)
-                if tf_idx >= 0:
-                    self.current_bar[tf] = tf_idx
+        if reference_tf in timeframe_data.get_available_timeframes():
+            # Check for conflicts between signal timeframe and reference timeframe
+            conflict_type = check_timeframe_conflict(timeframe_data, tf, reference_tf, entry_time)
             
-            # Process current bar for all timeframes
-            self._process_bar()
-            
-            # Update account equity
-            self.equity.append(self._calculate_equity())
+            # Adjust risk based on conflict
+            adjusted_risk = adjust_risk_for_conflict(risk_pct, conflict_type)
+            logger.info(f"Conflict check: {conflict_type}, risk adjusted from {risk_pct:.2%} to {adjusted_risk:.2%}")
         
-        # Close any remaining positions
-        self._close_all_positions()
-        
-        # Calculate performance metrics
-        self._calculate_metrics()
-        
-        logger.info(f"Backtest completed with {len(self.trades)} trades")
-        logger.info(f"Final equity: ${self.equity[-1]:.2f}")
-        
-        return {
-            'equity_curve': self.equity,
-            'trades': self.trades,
-            'metrics': self.metrics
-        }
-    
-    def _process_bar(self):
-        """Process the current bar across all timeframes"""
-        # Update open positions
-        self._update_positions()
-        
-        # Generate trading signals
-        signals = self._generate_signals()
-        
-        # Execute signals
-        for signal in signals:
-            self._execute_signal(signal)
-    
-    def _update_positions(self):
-        """Update all open positions"""
-        for pos in self.open_positions:
-            # Check if position should be closed
-            if self._should_close_position(pos):
-                self._close_position(pos)
-                continue
-            
-            # Update stop loss (trailing stop)
-            if RISK_PARAMS['trailing_stop']['enabled']:
-                self._update_trailing_stop(pos)
-            
-            # Update position target
-            self._update_position_target(pos)
-    
-    def _generate_signals(self):
-        """
-        Generate trading signals based on the strategy
-        
-        Returns:
-        --------
-        list
-            List of signal dictionaries
-        """
-        # Use the signal generator to generate signals
-        signals = generate_signals(self.tf_data)
-        
-        # Convert the signals to the expected format
-        formatted_signals = []
-        
-        for signal in signals:
-            if signal.get('valid', False):
-                formatted_signal = {
-                    'timeframe': signal['timeframe'],
-                    'direction': signal['direction'],
-                    'price': signal['price'],
-                    'time': signal['time'],
-                    'confidence': signal.get('confidence', 'medium'),
-                    'target': signal.get('target', {}).get('target_price'),
-                    'target_timeframe': signal.get('target', {}).get('target_timeframe')
-                }
-                
-                formatted_signals.append(formatted_signal)
-        
-        return formatted_signals
-    
-    def _validate_signal(self, timeframe, direction, extensions):
-        """
-        Validate a signal against higher timeframe context
-        
-        Parameters:
-        -----------
-        timeframe : str
-            Timeframe of the signal
-        direction : str
-            Direction of the signal ('long' or 'short')
-        extensions : dict
-            Dictionary of extension data for all timeframes
-            
-        Returns:
-        --------
-        bool
-            Whether the signal is valid
-        """
-        # Get timeframe hierarchy (smallest to largest)
-        tf_hierarchy = sorted(
-            self.timeframes,
-            key=lambda x: self.tf_data.get_timeframe_minutes(x)
-        )
-        
-        # Find position of current timeframe in hierarchy
-        tf_idx = tf_hierarchy.index(timeframe)
-        
-        # Check higher timeframes (if any)
-        higher_tfs = tf_hierarchy[tf_idx+1:] if tf_idx < len(tf_hierarchy) - 1 else []
-        
-        # If no higher timeframes, signal is valid
-        if not higher_tfs:
-            return True
-        
-        # Count how many higher timeframes have aligned extensions
-        aligned_count = 0
-        for htf in higher_tfs:
-            htf_ext = extensions.get(htf, {})
-            
-            # Check if higher timeframe has extension in same direction
-            if direction == 'long' and htf_ext.get('extended_down', False):
-                aligned_count += 1
-            elif direction == 'short' and htf_ext.get('extended_up', False):
-                aligned_count += 1
-        
-        # Signal is valid if we have enough aligned higher timeframes
-        min_agreement = max(1, len(higher_tfs) // 2)  # At least half of higher timeframes
-        return aligned_count >= min_agreement
-    
-    def _execute_signal(self, signal):
-        """
-        Execute a trading signal by opening a position
-        
-        Parameters:
-        -----------
-        signal : dict
-            Signal information
-        """
         # Calculate position size
-        size = self._calculate_position_size(signal)
-        
-        # Calculate stop loss level
-        stop_level = self._calculate_stop_level(signal)
-        
-        # Calculate target level
-        target_level = self._calculate_target_level(signal)
-        
-        # Create and open the position
-        position = Position(
-            symbol=self.tf_data.get_symbol(),
-            direction=signal['direction'],
-            entry_price=signal['price'],
-            entry_time=signal['time'],
-            size=size,
-            stop_loss=stop_level,
-            take_profit=target_level,
-            timeframe=signal['timeframe']
-        )
-        
-        # Add slippage to entry
-        if signal['direction'] == 'long':
-            position.entry_price *= (1 + self.slippage)
-        else:
-            position.entry_price *= (1 - self.slippage)
-        
-        # Add position to open positions
-        self.open_positions.append(position)
-        self.positions.append(position)
-        
-        # Update account state
-        self.balance -= self._calculate_commission(position.entry_price * position.size)
-        
-        logger.info(f"Opened {signal['direction']} position of {size} shares at ${signal['price']:.2f}")
-    
-    def _close_position(self, position):
-        """
-        Close an open position
-        
-        Parameters:
-        -----------
-        position : Position
-            Position to close
-        """
-        # Get current price for the position's timeframe
-        tf = position.timeframe
-        idx = self.current_bar[tf]
-        data = self.tf_data.get_timeframe(tf)
-        close_price = data.iloc[idx]['Close']
-        
-        # Add slippage to exit
-        if position.direction == 'long':
-            close_price *= (1 - self.slippage)
-        else:
-            close_price *= (1 + self.slippage)
-        
-        # Close the position
-        position.close(
-            exit_price=close_price,
-            exit_time=data.iloc[idx]['Time'] if 'Time' in data.columns else data.index[idx]
-        )
-        
-        # Create trade record
-        trade = Trade.from_position(position)
-        self.trades.append(trade)
-        
-        # Update account state
-        self.balance += (position.exit_price * position.size) - self._calculate_commission(position.exit_price * position.size)
-        
-        # Move position from open to closed
-        self.open_positions.remove(position)
-        self.closed_positions.append(position)
-        
-        logger.info(f"Closed {position.direction} position at ${close_price:.2f}, P&L: ${position.realized_pnl:.2f}")
-    
-    def _close_all_positions(self):
-        """Close all open positions"""
-        positions_to_close = self.open_positions.copy()
-        for position in positions_to_close:
-            self._close_position(position)
-    
-    def _should_close_position(self, position):
-        """
-        Determine if a position should be closed
-        
-        Parameters:
-        -----------
-        position : Position
-            Position to evaluate
+        risk_amount = account_balance * adjusted_risk
+        risk_per_unit = abs(signal['entry_price'] - signal['stop_price'])
+        if risk_per_unit <= 0:
+            logger.warning(f"Invalid risk per unit: {risk_per_unit}. Skipping signal.")
+            continue
             
-        Returns:
-        --------
-        bool
-            Whether the position should be closed
-        """
-        # Get current price data for the position's timeframe
-        tf = position.timeframe
-        idx = self.current_bar[tf]
-        data = self.tf_data.get_timeframe(tf)
-        current_bar = data.iloc[idx]
+        position_size = risk_amount / risk_per_unit
         
-        # Check stop loss
-        if position.direction == 'long' and current_bar['Low'] <= position.stop_loss:
-            return True
-        if position.direction == 'short' and current_bar['High'] >= position.stop_loss:
-            return True
+        # Limit position size based on max trade size parameter
+        max_position_pct = params.get_param('risk_management.max_position_size_percent', 20.0) / 100.0
+        max_position_size = account_balance * max_position_pct / signal['entry_price']
+        position_size = min(position_size, max_position_size)
         
-        # Check take profit
-        if position.direction == 'long' and current_bar['High'] >= position.take_profit:
-            return True
-        if position.direction == 'short' and current_bar['Low'] <= position.take_profit:
-            return True
+        # Get target timeframe and price
+        target_tf = get_next_timeframe_in_hierarchy(tf)
+        target_price = get_target_for_timeframe(timeframe_data, target_tf, signal_type)
         
-        # Check if we have a reversal signal
-        # (TODO: Implement more complex exit conditions based on strategy)
+        # If target price not available, use reward-risk ratio to set target
+        if target_price is None:
+            reward_risk_ratio = params.get_param('risk_management.reward_risk_ratio', 2.0)
+            risk = abs(signal['entry_price'] - signal['stop_price'])
+            
+            if signal_type == 'LONG':
+                target_price = signal['entry_price'] + (risk * reward_risk_ratio)
+            else:  # SHORT
+                target_price = signal['entry_price'] - (risk * reward_risk_ratio)
         
+        # Create trade object
+        trade = {
+            'entry_time': entry_time,
+            'entry_price': signal['entry_price'],
+            'stop_price': signal['stop_price'],
+            'target_price': target_price,
+            'position_size': position_size,
+            'type': signal_type,
+            'timeframe': tf,
+            'target_timeframe': target_tf,
+            'conflict_type': conflict_type,
+            'status': 'open',
+            'exit_time': None,
+            'exit_price': None,
+            'exit_reason': None,
+            'profit': 0.0,
+            'profit_pct': 0.0,
+            'duration': 0.0,
+        }
+        
+        # Add to active trades
+        active_trades.append(trade)
+        logger.info(f"Opened {signal_type} trade on {tf} at {signal['entry_price']} with size {position_size:.2f}")
+    
+    # For each timeframe, get data after the last signal
+    future_data = {}
+    for tf in timeframe_data.get_available_timeframes():
+        data = timeframe_data.get_timeframe(tf)
+        if data is not None and not data.empty:
+            future_data[tf] = data
+    
+    # Simulate trades through all available data
+    for tf, data in future_data.items():
+        # Skip if no active trades in this timeframe
+        if not any(t['timeframe'] == tf and t['status'] == 'open' for t in active_trades):
+            continue
+            
+        # Process each bar
+        for idx, row in data.iterrows():
+            # Skip bars before the first signal
+            if idx < signals['datetime'].min():
+                continue
+                
+            # Process all active trades for this timeframe
+            for trade in active_trades:
+                if trade['timeframe'] == tf and trade['status'] == 'open' and trade['entry_time'] < idx:
+                    # Check for stop hit
+                    if (trade['type'] == 'LONG' and row['Low'] <= trade['stop_price']) or \
+                       (trade['type'] == 'SHORT' and row['High'] >= trade['stop_price']):
+                        # Stop hit
+                        close_trade(trade, idx, trade['stop_price'], 'stop_hit')
+                        logger.info(f"Stop hit for {trade['type']} trade on {tf} at {trade['stop_price']}")
+                        
+                    # Check for target hit
+                    elif (trade['type'] == 'LONG' and row['High'] >= trade['target_price']) or \
+                         (trade['type'] == 'SHORT' and row['Low'] <= trade['target_price']):
+                        # Target hit
+                        close_trade(trade, idx, trade['target_price'], 'target_hit')
+                        logger.info(f"Target hit for {trade['type']} trade on {tf} at {trade['target_price']}")
+                        
+                        # Check for progression to next timeframe
+                        if params.get_param('strategy.use_progressive_targeting', True):
+                            # Create new trade targeting the next timeframe
+                            create_progression_trade(trade, idx, row['Close'], active_trades, timeframe_data, params)
+    
+    # Close any remaining open trades at the last available price
+    for trade in active_trades:
+        if trade['status'] == 'open':
+            tf = trade['timeframe']
+            if tf in future_data and not future_data[tf].empty:
+                last_price = future_data[tf]['Close'].iloc[-1]
+                last_time = future_data[tf].index[-1]
+                close_trade(trade, last_time, last_price, 'end_of_data')
+                logger.info(f"Closed {trade['type']} trade on {tf} at {last_price} (end of data)")
+    
+    # Calculate final results
+    trades_df = pd.DataFrame([t for t in active_trades if t['status'] == 'closed'])
+    
+    # Update account balance and create equity curve
+    if not trades_df.empty:
+        trades_df = trades_df.sort_values('exit_time')
+        
+        for _, trade in trades_df.iterrows():
+            # Update account balance
+            account_balance += trade['profit']
+            equity_points.append((trade['exit_time'], account_balance))
+    
+    # Create equity curve DataFrame
+    equity_curve = pd.DataFrame(equity_points, columns=['datetime', 'balance'])
+    equity_curve.set_index('datetime', inplace=True)
+    
+    return trades_df, account_balance, equity_curve
+
+def close_trade(trade, exit_time, exit_price, reason):
+    """
+    Close a trade and calculate profit/loss.
+    
+    Args:
+        trade: Trade dictionary to update
+        exit_time: Exit timestamp
+        exit_price: Exit price
+        reason: Reason for exit
+    """
+    trade['exit_time'] = exit_time
+    trade['exit_price'] = exit_price
+    trade['exit_reason'] = reason
+    trade['status'] = 'closed'
+    
+    # Calculate profit
+    if trade['type'] == 'LONG':
+        price_diff = exit_price - trade['entry_price']
+    else:  # SHORT
+        price_diff = trade['entry_price'] - exit_price
+        
+    trade['profit'] = price_diff * trade['position_size']
+    trade['profit_pct'] = price_diff / trade['entry_price']
+    
+    # Calculate duration in hours (assuming datetime index)
+    if isinstance(exit_time, datetime) and isinstance(trade['entry_time'], datetime):
+        duration_seconds = (exit_time - trade['entry_time']).total_seconds()
+        trade['duration'] = duration_seconds / 3600.0  # Convert to hours
+    
+    # Add win/loss flag
+    trade['win'] = trade['profit'] > 0
+
+def create_progression_trade(completed_trade, current_time, current_price, active_trades, timeframe_data, params):
+    """
+    Create a new trade targeting the next timeframe after a successful trade.
+    
+    Args:
+        completed_trade: The successfully completed trade
+        current_time: Current timestamp
+        current_price: Current price
+        active_trades: List of active trades
+        timeframe_data: TimeframeData instance
+        params: Strategy parameters
+        
+    Returns:
+        bool: True if progression trade was created, False otherwise
+    """
+    # Only progress if this was a target hit
+    if completed_trade['exit_reason'] != 'target_hit':
         return False
     
-    def _update_trailing_stop(self, position):
-        """
-        Update trailing stop for a position
-        
-        Parameters:
-        -----------
-        position : Position
-            Position to update
-        """
-        # Only update trailing stop if activated
-        if not position.trailing_activated:
-            # Calculate current R multiple
-            r_multiple = position.current_r_multiple()
-            
-            # Activate trailing stop if R multiple exceeds threshold
-            if r_multiple >= RISK_PARAMS['trailing_stop']['activation']:
-                position.trailing_activated = True
-                logger.debug(f"Activated trailing stop at {r_multiple:.2f}R")
-        
-        # Update trailing stop if activated
-        if position.trailing_activated:
-            # Get current price data for the position's timeframe
-            tf = position.timeframe
-            idx = self.current_bar[tf]
-            data = self.tf_data.get_timeframe(tf)
-            current_bar = data.iloc[idx]
-            
-            # Calculate new stop level
-            if position.direction == 'long':
-                trailing_level = current_bar['High'] * (1 - RISK_PARAMS['trailing_stop']['step'])
-                if trailing_level > position.stop_loss:
-                    position.stop_loss = trailing_level
-                    logger.debug(f"Updated trailing stop to ${trailing_level:.2f}")
-            else:
-                trailing_level = current_bar['Low'] * (1 + RISK_PARAMS['trailing_stop']['step'])
-                if trailing_level < position.stop_loss:
-                    position.stop_loss = trailing_level
-                    logger.debug(f"Updated trailing stop to ${trailing_level:.2f}")
+    # Get next timeframe in hierarchy
+    current_tf = completed_trade['timeframe']
+    next_tf = get_next_timeframe_in_hierarchy(current_tf)
     
-    def _update_position_target(self, position):
-        """
-        Update position target based on progressive targeting framework
-        
-        Parameters:
-        -----------
-        position : Position
-            Position to update
-        """
-        # Get current price for the position's timeframe
-        tf = position.timeframe
-        idx = self.current_bar[tf]
-        data = self.tf_data.get_timeframe(tf)
-        current_price = data.iloc[idx]['Close']
-        
-        # Check if price is approaching current target
-        distance_to_target = abs(current_price - position.take_profit)
-        current_atr = self._calculate_atr(tf, idx, 14)  # 14-period ATR
-        
-        # If price is close to target (within 0.5 ATR), consider updating
-        if distance_to_target <= current_atr * 0.5:
-            # Get next timeframe in hierarchy
-            next_tf = self._get_next_timeframe(tf)
-            
-            # If there is a next timeframe, update target
-            if next_tf:
-                # Check if extension exists in next timeframe
-                next_tf_idx = self.current_bar[next_tf]
-                next_tf_data = self.tf_data.get_timeframe(next_tf)
-                
-                # Get 9 EMA for next timeframe
-                if 'EMA_9' in next_tf_data.columns:
-                    next_ema = next_tf_data.iloc[next_tf_idx]['EMA_9']
-                    
-                    # Update target to next timeframe's 9 EMA
-                    position.take_profit = next_ema
-                    position.target_timeframe = next_tf
-                    
-                    logger.info(f"Updated target to {next_tf} 9 EMA at ${next_ema:.2f}")
+    # Check if we reached the top of the hierarchy
+    if next_tf == current_tf:
+        logger.info(f"Reached top of timeframe hierarchy with {current_tf}")
+        return False
     
-    def _get_next_timeframe(self, current_tf):
-        """
-        Get the next timeframe in the hierarchy
-        
-        Parameters:
-        -----------
-        current_tf : str
-            Current timeframe
-            
-        Returns:
-        --------
-        str or None
-            Next timeframe or None if current is the highest
-        """
-        # Get timeframe hierarchy (smallest to largest)
-        tf_hierarchy = sorted(
-            self.timeframes,
-            key=lambda x: self.tf_data.get_timeframe_minutes(x)
-        )
-        
-        # Find position of current timeframe in hierarchy
-        tf_idx = tf_hierarchy.index(current_tf)
-        
-        # Return next timeframe if available
-        return tf_hierarchy[tf_idx+1] if tf_idx < len(tf_hierarchy) - 1 else None
+    # Check if next timeframe data is available
+    next_tf_data = timeframe_data.get_timeframe(next_tf)
+    if next_tf_data is None or next_tf_data.empty:
+        logger.warning(f"No data available for next timeframe {next_tf}")
+        return False
     
-    def _calculate_position_size(self, signal):
-        """
-        Calculate position size based on risk management rules
-        
-        Parameters:
-        -----------
-        signal : dict
-            Signal information
-            
-        Returns:
-        --------
-        float
-            Position size in shares/contracts
-        """
-        # Get stop loss level
-        stop_level = self._calculate_stop_level(signal)
-        
-        # Calculate risk amount
-        risk_percent = RISK_PARAMS['max_risk_per_trade']
-        risk_amount = self.balance * (risk_percent / 100.0)
-        
-        # Calculate dollar risk per share
-        entry_price = signal['price']
-        risk_per_share = abs(entry_price - stop_level)
-        
-        # Calculate position size
-        size = risk_amount / risk_per_share
-        
-        # Round to whole shares if fractional shares not enabled
-        if not self.enable_fractional_shares:
-            size = np.floor(size)
-        
-        # Ensure at least 1 share
-        size = max(1, size)
-        
-        return size
+    # Check if we already have a trade in the next timeframe
+    if any(t['timeframe'] == next_tf and t['status'] == 'open' for t in active_trades):
+        logger.info(f"Already have an open trade in the next timeframe {next_tf}")
+        return False
     
-    def _calculate_stop_level(self, signal):
-        """
-        Calculate stop loss level for a signal
-        
-        Parameters:
-        -----------
-        signal : dict
-            Signal information
-            
-        Returns:
-        --------
-        float
-            Stop loss price level
-        """
-        # Get ATR for the signal's timeframe
-        tf = signal['timeframe']
-        idx = self.current_bar[tf]
-        atr = self._calculate_atr(tf, idx, 14)  # 14-period ATR
-        
-        # Calculate stop loss based on ATR
-        if signal['direction'] == 'long':
-            return signal['price'] * (1 - atr / signal['price'] * 2)  # 2 ATR for long stops
-        else:
-            return signal['price'] * (1 + atr / signal['price'] * 2)  # 2 ATR for short stops
+    # Get target for the next timeframe
+    next_target_tf = get_next_timeframe_in_hierarchy(next_tf)
+    next_target_price = get_target_for_timeframe(timeframe_data, next_target_tf, completed_trade['type'])
     
-    def _calculate_target_level(self, signal):
-        """
-        Calculate initial target level for a signal
+    # If target not available, use reward-risk ratio
+    if next_target_price is None:
+        # Get reference timeframe for context
+        reference_tf = params.get_param('timeframes.reference_timeframe', '4h')
         
-        Parameters:
-        -----------
-        signal : dict
-            Signal information
+        # Check for conflicts between next timeframe and reference
+        conflict_type = "None"
+        if reference_tf in timeframe_data.get_available_timeframes():
+            conflict_type = check_timeframe_conflict(timeframe_data, next_tf, reference_tf, current_time)
+        
+        # Use a wider stop for progression trades
+        stop_buffer = params.get_param('risk_management.progression_stop_buffer', 1.5)
+        
+        # Calculate stop based on ATR or percentage
+        stop_pct = params.get_param('risk_management.default_stop_percent', 0.01) * stop_buffer
+        
+        if completed_trade['type'] == 'LONG':
+            stop_price = current_price * (1 - stop_pct)
             
-        Returns:
-        --------
-        float
-            Target price level
-        """
-        # Get the next timeframe in hierarchy
-        tf = signal['timeframe']
-        next_tf = self._get_next_timeframe(tf)
-        
-        if next_tf:
-            # Get 9 EMA for next timeframe
-            next_tf_idx = self.current_bar[next_tf]
-            next_tf_data = self.tf_data.get_timeframe(next_tf)
+            # Calculate target using reward-risk ratio
+            reward_risk_ratio = params.get_param('risk_management.reward_risk_ratio', 2.0)
+            risk = current_price - stop_price
+            next_target_price = current_price + (risk * reward_risk_ratio)
             
-            if 'EMA_9' in next_tf_data.columns:
-                # Use next timeframe's 9 EMA as target
-                target = next_tf_data.iloc[next_tf_idx]['EMA_9']
-            else:
-                # Fallback: use R multiple
-                stop_level = self._calculate_stop_level(signal)
-                risk = abs(signal['price'] - stop_level)
-                target = signal['price'] + (risk * RISK_PARAMS['target_risk_reward'] * (1 if signal['direction'] == 'long' else -1))
-        else:
-            # Use R multiple for highest timeframe
-            stop_level = self._calculate_stop_level(signal)
-            risk = abs(signal['price'] - stop_level)
-            target = signal['price'] + (risk * RISK_PARAMS['target_risk_reward'] * (1 if signal['direction'] == 'long' else -1))
-        
-        return target
+        else:  # SHORT
+            stop_price = current_price * (1 + stop_pct)
+            
+            # Calculate target using reward-risk ratio
+            reward_risk_ratio = params.get_param('risk_management.reward_risk_ratio', 2.0)
+            risk = stop_price - current_price
+            next_target_price = current_price - (risk * reward_risk_ratio)
+    else:
+        # Use a simpler stop calculation for progression trades
+        stop_pct = params.get_param('risk_management.progression_stop_percent', 0.01)
+        if completed_trade['type'] == 'LONG':
+            stop_price = current_price * (1 - stop_pct)
+        else:  # SHORT
+            stop_price = current_price * (1 + stop_pct)
     
-    def _calculate_atr(self, timeframe, index, period=14):
-        """
-        Calculate Average True Range (ATR)
-        
-        Parameters:
-        -----------
-        timeframe : str
-            Timeframe to calculate ATR for
-        index : int
-            Current index in the timeframe
-        period : int
-            ATR period
-            
-        Returns:
-        --------
-        float
-            ATR value
-        """
-        # Get data for timeframe
-        data = self.tf_data.get_timeframe(timeframe)
-        
-        # Ensure we have enough data
-        if index < period:
-            # Not enough data, use a default percentage of price
-            return data.iloc[index]['Close'] * 0.01
-        
-        # Calculate true range
-        tr = pd.DataFrame(index=data.index)
-        tr['high'] = data['High']
-        tr['low'] = data['Low']
-        tr['close'] = data['Close'].shift(1)
-        
-        tr['tr1'] = tr['high'] - tr['low']
-        tr['tr2'] = abs(tr['high'] - tr['close'])
-        tr['tr3'] = abs(tr['low'] - tr['close'])
-        
-        tr['tr'] = tr[['tr1', 'tr2', 'tr3']].max(axis=1)
-        
-        # Calculate ATR
-        atr = tr['tr'].rolling(window=period).mean().iloc[index]
-        
-        return atr if not np.isnan(atr) else data.iloc[index]['Close'] * 0.01
+    # Calculate position size
+    account_balance = params.get_param('risk_management.initial_balance', 10000.0)
+    # Sum profits from previous trades
+    for trade in active_trades:
+        if trade['status'] == 'closed':
+            account_balance += trade['profit']
     
-    def _calculate_commission(self, trade_value):
-        """
-        Calculate commission for a trade
-        
-        Parameters:
-        -----------
-        trade_value : float
-            Trade value
-            
-        Returns:
-        --------
-        float
-            Commission amount
-        """
-        return trade_value * self.commission
+    # Use a smaller risk for progression trades
+    progression_risk_pct = params.get_param('risk_management.progression_risk_percent', 0.5) / 100.0
+    risk_amount = account_balance * progression_risk_pct
+    risk_per_unit = abs(current_price - stop_price)
     
-    def _calculate_equity(self):
-        """
-        Calculate current equity
+    if risk_per_unit <= 0:
+        logger.warning(f"Invalid risk per unit for progression trade: {risk_per_unit}")
+        return False
         
-        Returns:
-        --------
-        float
-            Current equity value
-        """
-        # Start with cash balance
-        equity = self.balance
-        
-        # Add unrealized P&L from open positions
-        for pos in self.open_positions:
-            # Get current price for position's timeframe
-            tf = pos.timeframe
-            idx = self.current_bar[tf]
-            data = self.tf_data.get_timeframe(tf)
-            current_price = data.iloc[idx]['Close']
-            
-            # Calculate unrealized P&L
-            if pos.direction == 'long':
-                unrealized_pnl = (current_price - pos.entry_price) * pos.size
-            else:
-                unrealized_pnl = (pos.entry_price - current_price) * pos.size
-            
-            equity += unrealized_pnl
-        
-        return equity
+    position_size = risk_amount / risk_per_unit
     
-    def _calculate_metrics(self):
-        """Calculate performance metrics for the backtest"""
-        # Skip if no trades
-        if not self.trades:
-            self.metrics = {
-                'total_trades': 0,
-                'win_rate': 0,
-                'profit_factor': 0,
-                'max_drawdown': 0,
-                'sharpe_ratio': 0,
-                'sortino_ratio': 0,
-                'calmar_ratio': 0,
-                'omega_ratio': 0,
-                'gain_to_pain': 0,
-                'avg_holding_period': 0,
-                'expectancy': 0
-            }
-            return
-        
-        # Basic metrics
-        total_trades = len(self.trades)
-        winning_trades = sum(1 for t in self.trades if t.profit > 0)
-        losing_trades = sum(1 for t in self.trades if t.profit <= 0)
-        
-        win_rate = winning_trades / total_trades if total_trades > 0 else 0
-        
-        gross_profit = sum(t.profit for t in self.trades if t.profit > 0)
-        gross_loss = abs(sum(t.profit for t in self.trades if t.profit <= 0))
-        
-        profit_factor = gross_profit / gross_loss if gross_loss > 0 else float('inf')
-        
-        # Calculate equity curve and drawdown
-        equity_curve = np.array(self.equity)
-        hwm = np.maximum.accumulate(equity_curve)  # High water mark
-        drawdown = (hwm - equity_curve) / hwm * 100.0  # Percentage drawdown
-        max_drawdown = np.max(drawdown)
-        
-        # Calculate returns
-        returns = np.diff(equity_curve) / equity_curve[:-1]
-        
-        # Sharpe ratio (annualized)
-        # Assuming daily returns
-        if len(returns) > 1:
-            sharpe_ratio = np.sqrt(252) * np.mean(returns) / np.std(returns)
-        else:
-            sharpe_ratio = 0
-        
-        # Sortino ratio (downside risk only)
-        if len(returns) > 1:
-            # Calculate downside returns (negative returns only)
-            downside_returns = returns[returns < 0]
-            if len(downside_returns) > 0:
-                downside_deviation = np.std(downside_returns)
-                sortino_ratio = np.sqrt(252) * np.mean(returns) / downside_deviation if downside_deviation > 0 else 0
-            else:
-                sortino_ratio = float('inf')  # No negative returns
-        else:
-            sortino_ratio = 0
-        
-        # Calmar ratio (return / max drawdown)
-        if max_drawdown > 0:
-            total_return = (equity_curve[-1] / equity_curve[0]) - 1
-            # Annualize the return (assuming daily data)
-            days = len(equity_curve)
-            annualized_return = ((1 + total_return) ** (252 / days)) - 1
-            calmar_ratio = annualized_return / (max_drawdown / 100.0)
-        else:
-            calmar_ratio = float('inf')  # No drawdown
-        
-        # Omega ratio
-        if len(returns) > 1:
-            # Define a threshold return (0 = breakeven)
-            threshold = 0
-            # Calculate positive and negative deviations from threshold
-            positive_returns = returns[returns > threshold] - threshold
-            negative_returns = threshold - returns[returns < threshold]
-            
-            # Calculate Omega ratio
-            if len(negative_returns) > 0 and np.sum(negative_returns) > 0:
-                omega_ratio = np.sum(positive_returns) / np.sum(negative_returns)
-            else:
-                omega_ratio = float('inf')  # No negative deviations
-        else:
-            omega_ratio = 0
-        
-        # Gain to pain ratio
-        if gross_loss > 0:
-            gain_to_pain = gross_profit / gross_loss
-        else:
-            gain_to_pain = float('inf')  # No losses
-        
-        # Average holding period (in days or bars)
-        if total_trades > 0:
-            # Calculate the holding period for each trade
-            holding_periods = []
-            for trade in self.trades:
-                if hasattr(trade, 'entry_time') and hasattr(trade, 'exit_time'):
-                    if isinstance(trade.entry_time, pd.Timestamp) and isinstance(trade.exit_time, pd.Timestamp):
-                        holding_period = (trade.exit_time - trade.entry_time).total_seconds() / (60 * 60 * 24)  # Convert to days
-                        holding_periods.append(holding_period)
-            
-            avg_holding_period = np.mean(holding_periods) if holding_periods else 0
-        else:
-            avg_holding_period = 0
-        
-        # Expectancy (average profit/loss per trade)
-        if total_trades > 0:
-            avg_win = gross_profit / winning_trades if winning_trades > 0 else 0
-            avg_loss = -gross_loss / losing_trades if losing_trades > 0 else 0
-            expectancy = (win_rate * avg_win) - ((1 - win_rate) * avg_loss)
-        else:
-            expectancy = 0
-        
-        # Store metrics
-        self.metrics = {
-            'total_trades': total_trades,
-            'winning_trades': winning_trades,
-            'losing_trades': losing_trades,
-            'win_rate': win_rate,
-            'gross_profit': gross_profit,
-            'gross_loss': gross_loss,
-            'net_profit': gross_profit - gross_loss,
-            'profit_factor': profit_factor,
-            'max_drawdown': max_drawdown,
-            'sharpe_ratio': sharpe_ratio,
-            'sortino_ratio': sortino_ratio,
-            'calmar_ratio': calmar_ratio,
-            'omega_ratio': omega_ratio,
-            'gain_to_pain': gain_to_pain,
-            'avg_holding_period': avg_holding_period,
-            'expectancy': expectancy,
-            'average_trade': (gross_profit - gross_loss) / total_trades if total_trades > 0 else 0,
-            'average_winner': gross_profit / winning_trades if winning_trades > 0 else 0,
-            'average_loser': -gross_loss / losing_trades if losing_trades > 0 else 0,
-            'largest_winner': max(t.profit for t in self.trades) if self.trades else 0,
-            'largest_loser': min(t.profit for t in self.trades) if self.trades else 0,
-            'max_consecutive_winners': self._max_consecutive(lambda t: t.profit > 0),
-            'max_consecutive_losers': self._max_consecutive(lambda t: t.profit <= 0)
-        }
+    # Create new trade
+    new_trade = {
+        'entry_time': current_time,
+        'entry_price': current_price,
+        'stop_price': stop_price,
+        'target_price': next_target_price,
+        'position_size': position_size,
+        'type': completed_trade['type'],  # Same direction as completed trade
+        'timeframe': next_tf,
+        'target_timeframe': next_target_tf,
+        'conflict_type': "None",  # We'll check this later
+        'status': 'open',
+        'exit_time': None,
+        'exit_price': None,
+        'exit_reason': None,
+        'profit': 0.0,
+        'profit_pct': 0.0,
+        'duration': 0.0,
+        'is_progression': True,
+        'parent_timeframe': completed_trade['timeframe']
+    }
     
-    def _max_consecutive(self, condition_func):
-        """
-        Calculate maximum consecutive occurrences
-        
-        Parameters:
-        -----------
-        condition_func : function
-            Function that returns True/False for each trade
-            
-        Returns:
-        --------
-        int
-            Maximum consecutive occurrences
-        """
-        # Skip if no trades
-        if not self.trades:
-            return 0
-        
-        # Map trades to True/False based on condition
-        results = [condition_func(t) for t in self.trades]
-        
-        # Calculate max consecutive
-        max_consecutive = 0
-        current_consecutive = 0
-        for r in results:
-            if r:
-                current_consecutive += 1
-                max_consecutive = max(max_consecutive, current_consecutive)
-            else:
-                current_consecutive = 0
-        
-        return max_consecutive 
+    # Add to active trades
+    active_trades.append(new_trade)
+    logger.info(f"Created progression {completed_trade['type']} trade from {completed_trade['timeframe']} to {next_tf} at {current_price}")
+    
+    return True 

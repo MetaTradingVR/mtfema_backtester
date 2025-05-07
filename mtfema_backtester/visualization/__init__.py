@@ -1,23 +1,30 @@
 """
-Visualization package for creating charts and plots
+Visualization modules for the MT 9 EMA Extension Strategy Backtester.
 
-Timestamp: 2025-05-06 PST
+This package contains tools for creating interactive visualizations of backtest results
+and strategy analysis.
 """
 
-from mtfema_backtester.visualization.plot_indicators import (
-    plot_ema_extension, 
-    plot_bollinger_bands,
-    plot_extension_map,
-    plot_signal_timeline,
-    plot_progression_tracker,
-    plot_conflict_map
+from .performance_dashboard import (
+    create_performance_dashboard,
+    create_trade_timeline,
+    create_extension_signal_map,
+    add_equity_curve_plot,
+    add_performance_by_timeframe_plot,
+    add_monthly_returns_plot,
+    add_trade_results_by_direction_plot,
+    add_profit_distribution_plot,
+    add_timeframe_progression_plot
 )
 
 __all__ = [
-    'plot_ema_extension', 
-    'plot_bollinger_bands',
-    'plot_extension_map',
-    'plot_signal_timeline',
-    'plot_progression_tracker',
-    'plot_conflict_map'
+    'create_performance_dashboard',
+    'create_trade_timeline',
+    'create_extension_signal_map',
+    'add_equity_curve_plot',
+    'add_performance_by_timeframe_plot',
+    'add_monthly_returns_plot',
+    'add_trade_results_by_direction_plot',
+    'add_profit_distribution_plot',
+    'add_timeframe_progression_plot'
 ]
