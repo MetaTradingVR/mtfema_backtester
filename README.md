@@ -1,6 +1,61 @@
 # Multi-Timeframe 9 EMA Extension Strategy Backtester
 # MT 9 EMA Backtester
 
+📋 **Project Status & Roadmap:**
+For the latest, timestamped project status, implementation progress, and roadmap, see [docs/PROJECT_STATUS.md](docs/PROJECT_STATUS.md). This is the canonical source for all planning and progress updates.
+
+## 📊 Advanced Visualization Features (Added 2025-05-06)
+
+The backtester includes several advanced visualization tools for comprehensive strategy analysis:
+
+### Extension Map
+Visualizes extensions across all timeframes with a heatmap interface, making it easy to identify multi-timeframe confluence. Color coding shows extension direction (positive/negative) and intensity.
+
+### Signal Timeline
+Displays trading signals chronologically across different timeframes, with markers color-coded by direction (long/short) and sized by confidence level. Offers detailed hover information for in-depth signal analysis.
+
+### Progression Tracker
+Shows how trades progress through the timeframe hierarchy using an interactive Sankey diagram. Visualizes the flow from entry timeframe to subsequent target timeframes, with link thickness proportional to frequency.
+
+### Conflict Map
+Highlights detected timeframe conflicts with visual indicators for different conflict types (Consolidation, Direct Correction, Trap Setup). Makes it easy to understand where and why risk adjustments were applied.
+
+All visualizations are built with Plotly for modern, interactive display and can be saved as standalone HTML files for sharing or further analysis.
+
+## 🖥️ Interactive Web Interface (Added 2025-05-06)
+
+The backtester now features a modern, responsive web interface built with Streamlit:
+
+### Features
+
+- **Interactive Dashboard**: Configure and run backtests from a user-friendly UI with real-time parameter updates
+- **Multi-Tab Interface**: Separate tabs for different visualizations and analysis views
+- **Symbol Search**: Find and select trading symbols with intelligent suggestions
+- **Parameter Adjustment**: Fine-tune strategy parameters with instant feedback
+- **Performance Metrics**: View key performance indicators in a clean, card-based layout
+- **Trade Analysis**: Examine individual trades with detailed statistics and visualizations
+
+### Running the Web Interface
+
+```bash
+# Install Streamlit if not already installed
+pip install streamlit
+
+# Launch the web interface
+streamlit run mtfema_backtester/run_web_app.py
+
+# The app will open in your default web browser at http://localhost:8501
+```
+
+### Customization Options
+
+The web interface provides comprehensive parameter controls:
+- EMA period and threshold adjustments
+- Timeframe selection with hierarchical organization
+- Risk management settings with ATR-based stop loss options
+- Symbol search with popular suggestions
+- Date range selection for backtesting periods
+
 A professional backtesting platform for the Multi-Timeframe 9 EMA Extension Strategy, featuring comprehensive analysis tools, community features, and advanced trading analytics.
 
 ## Features
@@ -128,80 +183,29 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 
 ## Overview
 
-The MT 9 EMA Backtester is a sophisticated Python-based platform designed to backtest and optimize the Multi-Timeframe 9 EMA Extension Strategy. This strategy leverages price extensions from the 9 EMA across multiple timeframes to identify high-probability trading opportunities.
+This backtester is designed to test and optimize the MT 9 EMA Extension Strategy, a sophisticated trading system that capitalizes on price extensions from the 9 EMA across a hierarchical timeframe structure. The strategy systematically identifies, validates, and trades extensions through a progressive targeting framework that moves methodically through the timeframe ladder.
 
-## Highlights
+## Features
 
-- **Multi-Timeframe Analysis**: Combines signals from different timeframes (1m → 5m → 10m → 15m → 30m → 1h → 4h → daily → weekly → monthly)
-- **Enhanced Performance**: Numba JIT compilation, vectorized operations, and multiprocessing support
-- **Flexible Configuration**: YAML/JSON configs with environment variable overrides
-- **Comprehensive Testing**: Unit, integration, and performance tests with > 90% coverage
-- **Continuous Integration**: GitHub Actions workflow with testing on multiple Python versions
-- **Rich Visualization**: Detailed charts and performance dashboards
+- **Multi-Timeframe Analysis**: Support for any combination of timeframes (1m, 5m, 15m, 30m, 1h, 4h, 1d, 1w)
+- **EMA Extension Detection**: Identifies when price extends significantly from the 9 EMA
+- **Bollinger Band Analysis**: Volatility measurement and breakout detection
+- **Reclamation Detection**: Identifies when price reclaims the EMA and tracks pullbacks
+- **Performance Metrics**: Comprehensive trade statistics and equity curve analysis
+- **Visualization Tools**: Interactive HTML plots for visual analysis
+- **Configurable Parameters**: Extensively customizable strategy parameters
+- **Flexible Data Sources**: Supports Yahoo Finance with easy extension to other data providers
 
-## Key Features
+## Development Status
 
-- **Strategy Components**:
-  - Extension detection from 9 EMA across timeframes
-  - EMA reclamation for entry signals
-  - Pullback entry with Fibonacci retracements
-  - Progressive targeting through higher timeframes
-  - Conflict resolution between timeframes
-  - Sophisticated risk management and position sizing
-
-- **Performance Optimizations**:
-  - Numba JIT compilation for critical calculations
-  - Vectorized operations instead of loops
-  - Multiprocessing for parallel parameter optimization
-  - Memory-efficient data structures
-
-- **Configuration System**:
-  - Support for YAML and JSON configuration files
-  - Environment variable overrides (e.g., `MTFEMA_STRATEGY__EMA_PERIOD=21`)
-  - Type conversion and validation
-  - Hierarchical configuration with dot notation access
-  - Global configuration instance with caching
-
-- **Testing Framework**:
-  - Pytest-based test suite with fixtures
-  - Unit tests for individual components
-  - Integration tests for component interactions
-  - Performance benchmarking and scaling tests
-  - Coverage reporting
-
-- **Continuous Integration**:
-  - GitHub Actions workflow for automated testing
-  - Multi-Python version testing (3.9, 3.10, 3.11, 3.13)
-  - Code quality checks (flake8, black, mypy)
-  - Documentation builds and deployment
-
-- **Feature Flag System**:
-  - Gradual rollout of new features
-  - User targeting for beta features
-  - Environment-based feature control
-  - Feature dependency management
-  - Runtime feature toggling
-
-- **API Rate Limiting**:
-  - Token bucket algorithm implementation
-  - Broker-specific rate limits
-  - Automatic retries with exponential backoff
-  - Decorator-based application
-  - Thread-safe implementation
-
-- **Community Features**:
-  - Trading setup sharing
-  - Signal creation and subscription
-  - Forum system with categories
-  - User profiles and reputation
-  - Performance leaderboards
-
-- **Global Accessibility**:
-  - Multi-language support
-  - Right-to-left text support
-  - Responsive mobile design
-  - Progressive web app capabilities
-  - Offline functionality
+- [x] Basic indicator calculation and visualization
+- [x] EMA extension detection
+- [x] Reclamation detection
+- [x] Configurable parameters system
+- [x] Performance metrics framework
+- [ ] Complete signal generation engine
+- [ ] Progressive targeting implementation
+- [ ] Optimization framework
 
 ## Project Status
 

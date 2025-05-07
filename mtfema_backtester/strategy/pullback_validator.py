@@ -33,23 +33,52 @@ class PullbackValidator:
     
     def validate_pullback(self, data, reclamation_index, direction, ema_series):
         """
-        Validate a pullback after EMA reclamation
-        
+        Validate a pullback after EMA reclamation using Fibonacci retracement logic.
+
+        Timestamp: 2025-05-06 PST
+        Reference: See 'Pullback Entry Logic' in strategy_playbook.md (Section 3.3)
+
         Parameters:
         -----------
         data : pandas.DataFrame
-            Price data with OHLCV columns
+            Price data with OHLCV columns.
         reclamation_index : int
-            Index where EMA reclamation occurred
+            Index where EMA reclamation occurred.
         direction : str
-            Direction of trade ('long' or 'short')
+            Direction of trade ('long' or 'short').
         ema_series : pandas.Series
-            9 EMA values
-            
+            9 EMA values.
+
         Returns:
         --------
         dict
-            Validation result with details
+            Validation result with details:
+            - valid: bool, whether pullback is valid
+            - is_in_fib_zone: bool, price in 50-61.8% retracement zone
+            - higher_low/lower_high: bool, structure confirmation
+            - bullish_candle/bearish_candle: bool, candle confirmation
+            - fib_levels: dict, key Fibonacci levels
+            - current_low/current_high: float, price tested
+            - swing_low/swing_high: float, reference swing
+            - reclamation_ema: float, EMA at reclamation
+            - pullback_ratio: float, retracement ratio
+
+        Usage Example:
+        --------------
+        >>> validator = PullbackValidator()
+        >>> result = validator.validate_pullback(data, reclamation_index, 'long', ema_series)
+        >>> if result['valid']:
+        ...     print('Valid bullish pullback detected!')
+
+        >>> result = validator.validate_pullback(data, reclamation_index, 'short', ema_series)
+        >>> if result['valid']:
+        ...     print('Valid bearish pullback detected!')
+
+        Edge Cases:
+        -----------
+        - Returns valid=False if insufficient data for lookback or future bar.
+        - Handles division by zero if range is zero.
+        - All logic branches are unit tested (see tests/strategy/test_pullback_validator.py).
         """
         is_long = direction == 'long'
         lookback_bars = 10  # Bars to look back for swing high/low

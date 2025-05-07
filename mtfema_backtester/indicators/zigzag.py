@@ -11,7 +11,10 @@ logger = logging.getLogger(__name__)
 class ZigZag:
     """
     ZigZag indicator implementation for detecting significant
-    market swing points (highs and lows)
+    market swing points (highs and lows).
+
+    Timestamp: 2025-05-06 PST
+    Reference: See 'Primary Indicators' and 'Pullback Entry Logic' in strategy_playbook.md (Sections 2.1, 3.3, 7.3)
     """
     
     def __init__(self, depth=5, deviation=5.0, backstep=3):
@@ -35,21 +38,37 @@ class ZigZag:
     
     def calculate(self, data, high_col='High', low_col='Low'):
         """
-        Calculate the ZigZag indicator to identify significant swing points
-        
+        Calculate the ZigZag indicator to identify significant swing points.
+
+        Timestamp: 2025-05-06 PST
+        Reference: See 'ZigZag' and 'Pullback Entry Logic' in strategy_playbook.md (Sections 2.1, 3.3)
+
         Parameters:
         -----------
         data : pandas.DataFrame
-            Price data with OHLCV columns
+            Price data with OHLCV columns.
         high_col : str
-            Column name for high prices
+            Column name for high prices.
         low_col : str
-            Column name for low prices
-            
+            Column name for low prices.
+
         Returns:
         --------
         pandas.DataFrame
-            DataFrame with ZigZag values and swing points
+            DataFrame with ZigZag values and swing point flags (SwingHigh, SwingLow, HigherHigh, etc.)
+
+        Usage Example:
+        --------------
+        >>> zz = ZigZag(depth=5, deviation=5.0)
+        >>> zz_result = zz.calculate(data)
+        >>> swing_highs = data[zz_result['SwingHigh']]
+        >>> swing_lows = data[zz_result['SwingLow']]
+
+        Edge Cases:
+        -----------
+        - Returns empty DataFrame if insufficient data.
+        - Handles flat or choppy data gracefully.
+        - All logic branches should be unit tested (see tests/indicators/test_zigzag.py).
         """
         if data is None or len(data) < self.depth:
             logger.warning("Insufficient data for ZigZag calculation")

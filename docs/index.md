@@ -1,6 +1,79 @@
-# Multi-Timeframe 9 EMA Extension Strategy Backtester
+# 📋 For the latest project status, implementation progress, and roadmap, see [PROJECT_STATUS.md](PROJECT_STATUS.md). This is the canonical, timestamped source for all planning and progress updates.
 
-A comprehensive backtesting system for the Multi-Timeframe 9 EMA Extension trading strategy, built with Python 3.13.
+# MT 9 EMA Extension Strategy Backtester
+
+Welcome to the documentation for the Multi-Timeframe 9 EMA Extension Strategy Backtester.
+
+## Strategy Overview
+
+The MT 9 EMA Extension Strategy is based on identifying significant price extensions from the 9-period Exponential Moving Average (EMA) across multiple timeframes. The strategy uses a hierarchical approach to timeframes, allowing for systematic entry and exit management.
+
+### Key Strategy Components
+
+1. **9 EMA Extension Detection**
+   - Identifies when price has extended significantly from the 9 EMA
+   - Uses dynamic thresholds based on timeframe volatility
+   - Generates extension signals for potential reversal setups
+
+2. **EMA Reclamation**
+   - Detects when price returns to and reclaims the 9 EMA after an extension
+   - Confirms the end of an extension phase
+   - Provides potential entry signals
+
+3. **Fibonacci Pullbacks**
+   - Validates entries based on Fibonacci retracement levels
+   - Ensures high-probability entry points
+   - Optimizes risk-reward ratios
+
+4. **Progressive Targeting**
+   - Follows targets through the timeframe hierarchy
+   - Uses higher timeframe structures for exit management
+   - Maximizes profit potential while managing risk
+
+## Backtester Features
+
+- **Multi-Timeframe Analysis**: Support for any combination of timeframes
+- **Customizable Parameters**: Extensive configuration options
+- **Performance Metrics**: Comprehensive trade statistics
+- **Interactive Visualization**: HTML-based charts and dashboards
+- **Optimization Tools**: Parameter testing and optimization
+
+## Getting Started
+
+To get started with the backtester:
+
+1. Install the required dependencies:
+   ```
+   pip install -r requirements.txt
+   ```
+
+2. Run a test with the NQ futures data:
+   ```
+   python run_nq_test.py --mode test
+   ```
+
+3. Generate and customize parameters:
+   ```
+   python run_nq_test.py --generate-params my_params.json
+   python run_nq_test.py --params-file my_params.json
+   ```
+
+## Operation Modes
+
+- **Test Mode**: Visualize indicators without generating trades
+- **Backtest Mode**: Evaluate trading performance with specific parameters
+- **Optimize Mode**: Test multiple parameter combinations
+
+## Resources
+
+- [Strategy Parameters Documentation](parameters.md)
+- [Performance Metrics Guide](metrics.md)
+- [Current Project Status](PROJECT_STATUS.md)
+- [Development Roadmap](../DEVELOPMENT.md)
+
+## Contributing
+
+Contributions to the backtester are welcome. Please see the [contribution guidelines](CONTRIBUTING.md) for more information.
 
 ## Recent Enhancements
 

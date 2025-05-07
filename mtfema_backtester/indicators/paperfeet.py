@@ -13,23 +13,42 @@ logger = logging.getLogger(__name__)
 
 def calculate_laguerre_rsi(data, gamma=0.7, period=4, column='Close'):
     """
-    Calculate the Laguerre RSI indicator
-    
+    Calculate the Laguerre RSI indicator with PaperFeet color transitions.
+
+    Timestamp: 2025-05-06 PST
+    Reference: See 'PaperFeet Laguerre RSI' and 'PaperFeet Color Transition Verification' in strategy_playbook.md (Sections 2.1, 3.4)
+
     Parameters:
     -----------
     data : pandas.DataFrame
-        Price data with OHLCV columns
+        Price data with OHLCV columns.
     gamma : float
-        Gamma parameter that controls the smoothness (0-1)
+        Gamma parameter that controls the smoothness (0-1).
     period : int
-        Lookback period for smoothing
+        Lookback period for smoothing.
     column : str
-        Column name to use for calculation
-        
+        Column name to use for calculation.
+
     Returns:
     --------
     pandas.DataFrame
-        DataFrame with Laguerre RSI and color indicator values
+        DataFrame with columns:
+        - LRSI: Laguerre RSI value (0-1)
+        - Color: 0=Red, 1=Yellow, 2=Green
+        - BullishTransition, BearishTransition: bool flags
+        - CompleteBullishTransition, CompleteBearishTransition: bool flags
+
+    Usage Example:
+    --------------
+    >>> pf = calculate_laguerre_rsi(data)
+    >>> if pf['CompleteBullishTransition'].iloc[-1]:
+    ...     print('Bullish PaperFeet transition detected!')
+
+    Edge Cases:
+    -----------
+    - Returns empty DataFrame if input is empty or None.
+    - Handles division by zero in RSI calculation.
+    - All logic branches should be unit tested (see tests/indicators/test_paperfeet.py).
     """
     if data is None or data.empty:
         logging.warning("Empty data provided for Laguerre RSI calculation")
@@ -155,21 +174,35 @@ def calculate_laguerre_rsi(data, gamma=0.7, period=4, column='Close'):
 
 def validate_paperfeet_transition(data, lookback=3, direction="bullish"):
     """
-    Validate if a PaperFeet color transition has occurred in the specified direction
-    
+    Validate if a PaperFeet color transition has occurred in the specified direction.
+
+    Timestamp: 2025-05-06 PST
+    Reference: See 'PaperFeet Color Transition Verification' in strategy_playbook.md (Section 3.4)
+
     Parameters:
     -----------
     data : pandas.DataFrame
-        DataFrame with PaperFeet Color column
+        DataFrame with PaperFeet Color column.
     lookback : int
-        Number of bars to look back
+        Number of bars to look back.
     direction : str
-        "bullish" or "bearish" to specify the transition direction
-        
+        "bullish" or "bearish" to specify the transition direction.
+
     Returns:
     --------
     bool
-        True if the specified transition is detected
+        True if the specified transition is detected.
+
+    Usage Example:
+    --------------
+    >>> pf = calculate_laguerre_rsi(data)
+    >>> if validate_paperfeet_transition(pf, lookback=3, direction="bullish"):
+    ...     print('Bullish transition detected!')
+
+    Edge Cases:
+    -----------
+    - Returns False if not enough data for lookback.
+    - Returns False for unknown direction.
     """
     if len(data) < lookback:
         return False

@@ -19,7 +19,7 @@ except ImportError:
     logger.warning("TA-Lib not available, using pandas for Bollinger Bands calculations")
     TALIB_AVAILABLE = False
 
-def calculate_bollinger_bands(data, period=20, stdev=2, column='Close'):
+def calculate_bollinger_bands(data, period=20, std_dev=2, column='Close'):
     """
     Calculate Bollinger Bands
     
@@ -29,7 +29,7 @@ def calculate_bollinger_bands(data, period=20, stdev=2, column='Close'):
         Price data with OHLCV columns
     period : int
         Moving average period
-    stdev : float
+    std_dev : float
         Standard deviation multiplier
     column : str
         Column to use for calculation
@@ -49,8 +49,8 @@ def calculate_bollinger_bands(data, period=20, stdev=2, column='Close'):
             upper, middle, lower = talib.BBANDS(
                 data[column].values,
                 timeperiod=period,
-                nbdevup=stdev,
-                nbdevdn=stdev,
+                nbdevup=std_dev,
+                nbdevdn=std_dev,
                 matype=0  # Simple Moving Average
             )
             
@@ -61,20 +61,20 @@ def calculate_bollinger_bands(data, period=20, stdev=2, column='Close'):
         else:
             # Calculate using pandas
             middle_band = data[column].rolling(window=period).mean()
-            std_dev = data[column].rolling(window=period).std()
-            upper_band = middle_band + (std_dev * stdev)
-            lower_band = middle_band - (std_dev * stdev)
+            std_dev_val = data[column].rolling(window=period).std()
+            upper_band = middle_band + (std_dev_val * std_dev)
+            lower_band = middle_band - (std_dev_val * std_dev)
         
-        logger.info(f"Calculated Bollinger Bands ({period}, {stdev}) successfully")
+        logger.info(f"Calculated Bollinger Bands ({period}, {std_dev}) successfully")
         return middle_band, upper_band, lower_band
     
     except Exception as e:
         logger.error(f"Error calculating Bollinger Bands: {str(e)}")
         return pd.Series(), pd.Series(), pd.Series()
 
-def detect_bollinger_breakouts(data, upper_band, lower_band, column='Close'):
+def detect_bollinger_breakouts(data, upper_band, lower_band, symbol=None, price_col='Close'):
     """
-    Detect price breakouts from Bollinger Bands
+    Detect breakouts of Bollinger Bands
     
     Parameters:
     -----------
@@ -84,31 +84,75 @@ def detect_bollinger_breakouts(data, upper_band, lower_band, column='Close'):
         Upper Bollinger Band
     lower_band : pandas.Series
         Lower Bollinger Band
-    column : str
-        Column to check for breakouts
+    symbol : str, optional
+        Symbol for multi-symbol data
+    price_col : str
+        Column to use for price comparison
         
     Returns:
     --------
-    pd.Series
-        Breakout signals (1 = upper breakout, -1 = lower breakout, 0 = none)
+    pandas.Series
+        Signal series (1 for breakout up, -1 for breakout down, 0 for no breakout)
     """
-    if data is None or data.empty:
-        logger.warning("Empty data provided for breakout detection")
-        return pd.Series()
-    
     try:
-        # Initialize signals
-        signals = pd.Series(0, index=data.index)
+        if data is None or data.empty:
+            logger.warning("Empty data provided for Bollinger Band breakout detection")
+            return pd.Series()
+            
+        # Ensure data is 1-dimensional
+        price_data = data[price_col]
+        if hasattr(price_data, 'values'):
+            price_values = price_data.values
+            if len(price_values.shape) > 1:
+                price_values = price_values.flatten()
+        else:
+            price_values = price_data
+            
+        # Ensure upper_band is 1-dimensional
+        if hasattr(upper_band, 'values'):
+            upper_values = upper_band.values
+            if len(upper_values.shape) > 1:
+                upper_values = upper_values.flatten()
+        else:
+            upper_values = upper_band
+            
+        # Ensure lower_band is 1-dimensional
+        if hasattr(lower_band, 'values'):
+            lower_values = lower_band.values
+            if len(lower_values.shape) > 1:
+                lower_values = lower_values.flatten()
+        else:
+            lower_values = lower_band
         
-        # Upper band breakouts (potentially bearish)
-        signals[data[column] > upper_band] = 1
+        # Check dimensions
+        if len(price_values) != len(upper_values) or len(price_values) != len(lower_values):
+            logger.warning(f"Dimension mismatch: Price {len(price_values)}, Upper {len(upper_values)}, Lower {len(lower_values)}")
+            # Try to align by index if possible
+            if hasattr(price_data, 'index') and hasattr(upper_band, 'index') and hasattr(lower_band, 'index'):
+                common_index = price_data.index.intersection(upper_band.index).intersection(lower_band.index)
+                price_values = price_data.loc[common_index].values
+                upper_values = upper_band.loc[common_index].values
+                lower_values = lower_band.loc[common_index].values
+            else:
+                # Truncate to the shortest length
+                min_len = min(len(price_values), len(upper_values), len(lower_values))
+                price_values = price_values[:min_len]
+                upper_values = upper_values[:min_len]
+                lower_values = lower_values[:min_len]
         
-        # Lower band breakouts (potentially bullish)
-        signals[data[column] < lower_band] = -1
+        # Create signals
+        signals = np.zeros(len(price_values))
         
-        logger.info("Detected Bollinger Band breakouts successfully")
-        return signals
-    
+        # Breakout up when price > upper band
+        signals[price_values > upper_values] = 1
+        
+        # Breakout down when price < lower band
+        signals[price_values < lower_values] = -1
+        
+        # Create a Series with the data index
+        result = pd.Series(signals, index=data.index[:len(signals)])
+        return result
+        
     except Exception as e:
         logger.error(f"Error detecting Bollinger Band breakouts: {str(e)}")
         return pd.Series()

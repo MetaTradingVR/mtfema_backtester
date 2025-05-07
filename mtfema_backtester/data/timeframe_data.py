@@ -118,19 +118,19 @@ class TimeframeData:
     
     def get_indicator(self, timeframe, indicator_name):
         """
-        Get calculated indicator data
+        Get an indicator for a timeframe
         
         Parameters:
         -----------
         timeframe : str
-            Timeframe identifier
+            Timeframe to get indicator for
         indicator_name : str
-            Name of the indicator
-            
+            Name of indicator to get
+        
         Returns:
         --------
-        pandas.Series or pandas.DataFrame
-            Calculated indicator values
+        pandas.DataFrame, pandas.Series, or dict
+            Indicator data, or None if not found
         """
         if timeframe not in self.indicators:
             logger.warning(f"No indicators found for timeframe {timeframe}")
@@ -141,6 +141,26 @@ class TimeframeData:
             return None
         
         return self.indicators[timeframe][indicator_name]
+    
+    def get_indicators(self, timeframe):
+        """
+        Get all indicator names for a timeframe
+        
+        Parameters:
+        -----------
+        timeframe : str
+            Timeframe to get indicators for
+        
+        Returns:
+        --------
+        list
+            List of indicator names, or empty list if none found
+        """
+        if timeframe not in self.indicators:
+            logger.warning(f"No indicators found for timeframe {timeframe}")
+            return []
+        
+        return list(self.indicators[timeframe].keys())
     
     def merge_indicator_with_data(self, timeframe, indicator_names=None):
         """

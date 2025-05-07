@@ -105,7 +105,18 @@ class DataLoader:
     
     def _get_cache_path(self, symbol, timeframe, start_date, end_date):
         """Get the path to the cache file"""
-        filename = f"{symbol}_{timeframe}_{start_date}_{end_date}.csv"
+        # Format dates as strings to avoid issues with special characters
+        if isinstance(start_date, datetime):
+            start_str = start_date.strftime('%Y%m%d')
+        else:
+            start_str = str(start_date).replace(':', '-').replace(' ', '_')
+        
+        if isinstance(end_date, datetime):
+            end_str = end_date.strftime('%Y%m%d')
+        else:
+            end_str = str(end_date).replace(':', '-').replace(' ', '_')
+        
+        filename = f"{symbol}_{timeframe}_{start_str}_{end_str}.csv"
         return os.path.join(self.cache_dir, filename)
     
     def _is_cache_expired(self, cache_file):
@@ -155,7 +166,7 @@ class DataLoader:
             
             # Download data
             df = yf.download(
-                tickers=symbol,
+                tickers=self._get_yahoo_symbol(symbol),
                 start=start_date,
                 end=end_date,
                 interval=interval,
@@ -234,3 +245,46 @@ class DataLoader:
                 result[tf] = data
         
         return result
+
+    def _get_yahoo_symbol(self, symbol):
+        """
+        Get the Yahoo Finance symbol for a given ticker
+        
+        Parameters:
+        -----------
+        symbol : str
+            Symbol to convert
+        
+        Returns:
+        --------
+        str
+            Yahoo Finance compatible symbol
+        """
+        # Map some common futures to Yahoo Finance symbols
+        futures_map = {
+            'ES': 'ES=F',  # E-mini S&P 500
+            'NQ': 'NQ=F',  # E-mini Nasdaq 100
+            'YM': 'YM=F',  # E-mini Dow Jones
+            'CL': 'CL=F',  # Crude Oil
+            'GC': 'GC=F',  # Gold
+            'SI': 'SI=F',  # Silver
+            'ZC': 'ZC=F',  # Corn
+            'ZW': 'ZW=F',  # Wheat
+            'ZS': 'ZS=F'   # Soybeans
+        }
+        
+        # Map some common forex to Yahoo Finance symbols
+        forex_map = {
+            'EURUSD': 'EURUSD=X',
+            'GBPUSD': 'GBPUSD=X',
+            'USDJPY': 'USDJPY=X'
+        }
+        
+        # Check if the symbol is in the maps
+        if symbol in futures_map:
+            return futures_map[symbol]
+        elif symbol in forex_map:
+            return forex_map[symbol]
+        
+        # Return the original symbol if not in maps
+        return symbol

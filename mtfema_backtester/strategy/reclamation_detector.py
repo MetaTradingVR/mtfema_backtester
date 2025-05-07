@@ -79,6 +79,12 @@ class ReclamationDetector:
                     import pandas_ta as ta
                     ema = ta.ema(data[price_col], length=self.ema_period)
             
+            # Check if data is aligned with EMA
+            if len(data) != len(ema):
+                logger.warning(f"Data and EMA length mismatch: {len(data)} vs {len(ema)}")
+                # Align the data
+                ema = ema.reindex(data.index, method='ffill')
+            
             # Create result DataFrame
             result = pd.DataFrame(index=data.index)
             result['EMA'] = ema
@@ -89,18 +95,38 @@ class ReclamationDetector:
             
             # Find crossovers
             for i in range(1, len(data)):
+                # Skip if we can't safely access the indices
+                if i-1 >= len(data) or i >= len(data) or i-1 >= len(ema) or i >= len(ema):
+                    continue
+                
+                # Get the current and previous values
+                prev_price = data[price_col].iloc[i-1]
+                curr_price = data[price_col].iloc[i]
+                prev_ema = ema.iloc[i-1]
+                curr_ema = ema.iloc[i]
+                
+                # Handle Series by getting scalar values
+                if isinstance(prev_price, pd.Series):
+                    prev_price = prev_price.iloc[0]
+                if isinstance(curr_price, pd.Series):
+                    curr_price = curr_price.iloc[0]
+                if isinstance(prev_ema, pd.Series):
+                    prev_ema = prev_ema.iloc[0]
+                if isinstance(curr_ema, pd.Series):
+                    curr_ema = curr_ema.iloc[0]
+                
                 # Bullish reclamation (close crosses above EMA)
-                if data[price_col].iloc[i-1] < ema.iloc[i-1] and data[price_col].iloc[i] > ema.iloc[i]:
+                if prev_price < prev_ema and curr_price > curr_ema:
                     bullish_reclaim[i] = True
                     
                     # Record the reclamation details
                     reclaim_details = {
                         'index': i,
                         'time': data.index[i],
-                        'reclaim_price': data[price_col].iloc[i],
-                        'reclaim_ema': ema.iloc[i],
-                        'reclaim_high': data['High'].iloc[i],
-                        'reclaim_low': data['Low'].iloc[i],
+                        'reclaim_price': curr_price,
+                        'reclaim_ema': curr_ema,
+                        'reclaim_high': float(data['High'].iloc[i].iloc[0]) if isinstance(data['High'].iloc[i], pd.Series) else float(data['High'].iloc[i]),
+                        'reclaim_low': float(data['Low'].iloc[i].iloc[0]) if isinstance(data['Low'].iloc[i], pd.Series) else float(data['Low'].iloc[i]),
                         'confirmed': False,
                         'confirmation_index': None,
                         'pullback_detected': False,
@@ -111,17 +137,17 @@ class ReclamationDetector:
                     self.reclamation_details['bullish'].append(reclaim_details)
                 
                 # Bearish reclamation (close crosses below EMA)
-                elif data[price_col].iloc[i-1] > ema.iloc[i-1] and data[price_col].iloc[i] < ema.iloc[i]:
+                elif prev_price > prev_ema and curr_price < curr_ema:
                     bearish_reclaim[i] = True
                     
                     # Record the reclamation details
                     reclaim_details = {
                         'index': i,
                         'time': data.index[i],
-                        'reclaim_price': data[price_col].iloc[i],
-                        'reclaim_ema': ema.iloc[i],
-                        'reclaim_high': data['High'].iloc[i],
-                        'reclaim_low': data['Low'].iloc[i],
+                        'reclaim_price': curr_price,
+                        'reclaim_ema': curr_ema,
+                        'reclaim_high': float(data['High'].iloc[i].iloc[0]) if isinstance(data['High'].iloc[i], pd.Series) else float(data['High'].iloc[i]),
+                        'reclaim_low': float(data['Low'].iloc[i].iloc[0]) if isinstance(data['Low'].iloc[i], pd.Series) else float(data['Low'].iloc[i]),
                         'confirmed': False,
                         'confirmation_index': None,
                         'pullback_detected': False,
@@ -150,14 +176,14 @@ class ReclamationDetector:
     
     def _track_confirmation(self, data, result, ema, price_col):
         """
-        Track confirmation of reclamations over multiple bars
+        Track confirmation of reclamations
         
         Parameters:
         -----------
         data : pandas.DataFrame
             Price data with OHLCV columns
         result : pandas.DataFrame
-            Result DataFrame with reclamation signals
+            DataFrame with reclamation signals
         ema : pandas.Series
             EMA values
         price_col : str
@@ -174,38 +200,76 @@ class ReclamationDetector:
         
         # Track confirmation status for each reclamation
         for i in range(len(data)):
+            # Check for invalid index
+            if i >= len(result['BullishReclaim']) or i >= len(result['BearishReclaim']):
+                continue
+            
+            # Handle bullish reclamations
             if result['BullishReclaim'].iloc[i]:
                 # Check if price stays above EMA for the confirmation period
                 if i + self.confirmation_bars < len(data):
                     confirmed = True
                     for j in range(1, self.confirmation_bars + 1):
-                        if data[price_col].iloc[i + j] < ema.iloc[i + j]:
+                        # Skip if index is out of bounds
+                        if i+j >= len(data) or i+j >= len(ema):
+                            confirmed = False
+                            break
+                        
+                        curr_price = data[price_col].iloc[i + j]
+                        curr_ema = ema.iloc[i + j]
+                        
+                        # Convert to scalars if Series
+                        if isinstance(curr_price, pd.Series):
+                            curr_price = curr_price.iloc[0]
+                        if isinstance(curr_ema, pd.Series):
+                            curr_ema = curr_ema.iloc[0]
+                        
+                        # If price drops below EMA, confirmation fails
+                        if curr_price < curr_ema:
                             confirmed = False
                             break
                     
+                    # If confirmed, mark it
                     if confirmed:
-                        bullish_confirmed[i + self.confirmation_bars] = True
+                        bullish_confirmed[i] = True
                         
-                        # Update reclamation details
+                        # Update the reclamation details
                         for details in self.reclamation_details['bullish']:
                             if details['index'] == i:
                                 details['confirmed'] = True
                                 details['confirmation_index'] = i + self.confirmation_bars
                                 break
             
-            if result['BearishReclaim'].iloc[i]:
+            # Handle bearish reclamations
+            elif result['BearishReclaim'].iloc[i]:
                 # Check if price stays below EMA for the confirmation period
                 if i + self.confirmation_bars < len(data):
                     confirmed = True
                     for j in range(1, self.confirmation_bars + 1):
-                        if data[price_col].iloc[i + j] > ema.iloc[i + j]:
+                        # Skip if index is out of bounds
+                        if i+j >= len(data) or i+j >= len(ema):
+                            confirmed = False
+                            break
+                        
+                        curr_price = data[price_col].iloc[i + j]
+                        curr_ema = ema.iloc[i + j]
+                        
+                        # Convert to scalars if Series
+                        if isinstance(curr_price, pd.Series):
+                            curr_price = curr_price.iloc[0]
+                        if isinstance(curr_ema, pd.Series):
+                            curr_ema = curr_ema.iloc[0]
+                        
+                        # If price rises above EMA, confirmation fails
+                        if curr_price > curr_ema:
                             confirmed = False
                             break
                     
+                    # If confirmed, mark it
                     if confirmed:
-                        bearish_confirmed[i + self.confirmation_bars] = True
+                        bearish_confirmed[i] = True
                         
-                        # Update reclamation details
+                        # Update the reclamation details
                         for details in self.reclamation_details['bearish']:
                             if details['index'] == i:
                                 details['confirmed'] = True

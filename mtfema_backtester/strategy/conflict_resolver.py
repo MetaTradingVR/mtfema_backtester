@@ -23,6 +23,13 @@ class ConflictType:
 class ConflictResolver:
     """
     Resolves conflicts between multiple timeframes for the strategy.
+    
+    Timestamp: 2025-05-06 PST
+    Reference: See 'Multi-Timeframe Conflict Resolution Logic' in strategy_playbook.md (Section 5)
+    
+    This class implements the conflict detection and resolution logic for handling discrepancies
+    between signals on different timeframes. It follows the approach outlined in the playbook
+    for consolidation, direct correction, and trap setup scenarios.
     """
     
     def __init__(self, 
@@ -59,19 +66,44 @@ class ConflictResolver:
     
     def detect_conflict(self, higher_tf_data, lower_tf_data):
         """
-        Detect conflict between two timeframes
+        Detect conflict between two timeframes.
+        
+        Timestamp: 2025-05-06 PST
+        Reference: See 'Conflict Types' and 'Resolution Logic' in strategy_playbook.md (Section 5.1, 5.2)
         
         Parameters:
         -----------
         higher_tf_data : dict
-            Data for higher timeframe with extension info
+            Data for higher timeframe with extension info.
+            Required keys: 'has_extension', 'extended_up', 'extended_down'
         lower_tf_data : dict
-            Data for lower timeframe with extension info
+            Data for lower timeframe with extension info.
+            Required keys: 'has_extension', 'extended_up', 'extended_down', 'reclaimed_up', 'reclaimed_down'
             
         Returns:
         --------
         str
-            Conflict type from ConflictType
+            Conflict type from ConflictType:
+            - NO_CONFLICT: No conflict detected
+            - CONSOLIDATION: Higher TF extended, lower TF around EMA
+            - DIRECT_CORRECTION: TFs extended in opposite directions
+            - TRAP_SETUP: Reclamation against prevailing higher TF extension
+            
+        Usage Example:
+        --------------
+        >>> resolver = ConflictResolver()
+        >>> conflict = resolver.detect_conflict(
+        ...     {'has_extension': True, 'extended_up': True, 'extended_down': False},
+        ...     {'has_extension': False, 'extended_up': False, 'extended_down': False, 
+        ...      'reclaimed_up': False, 'reclaimed_down': False}
+        ... )
+        >>> if conflict == ConflictType.CONSOLIDATION:
+        ...     print('Consolidation detected - lower TF ranging while higher TF extended')
+            
+        Edge Cases:
+        -----------
+        - Handles missing keys in input dictionaries using .get() with defaults.
+        - Returns NO_CONFLICT if the data does not match any conflict patterns.
         """
         # Extract extension info
         higher_tf_extended = higher_tf_data.get('has_extension', False)
@@ -106,21 +138,44 @@ class ConflictResolver:
     
     def resolve_conflict(self, conflict_type, signal, risk_params):
         """
-        Resolve conflict by adjusting signal parameters
+        Resolve conflict by adjusting signal parameters and risk levels.
+        
+        Timestamp: 2025-05-06 PST
+        Reference: See 'Resolution Logic' in strategy_playbook.md (Section 5.2)
         
         Parameters:
         -----------
         conflict_type : str
-            Conflict type from ConflictType
+            Conflict type from ConflictType.
         signal : dict
-            Signal information to be adjusted
+            Signal information to be adjusted (position details, targets, etc.).
         risk_params : dict
-            Risk parameters to be adjusted
+            Risk parameters to be adjusted (max risk, position sizing, etc.).
             
         Returns:
         --------
         tuple
-            (adjusted_signal, adjusted_risk_params)
+            (adjusted_signal, adjusted_risk_params) with modified values based on conflict:
+            - TRAP_SETUP: 50% risk reduction, limited progression, low confidence
+            - DIRECT_CORRECTION: 50% risk reduction, medium confidence
+            - CONSOLIDATION: Standard risk, breakout monitoring, medium confidence
+            - NO_CONFLICT: No adjustments
+            
+        Usage Example:
+        --------------
+        >>> resolver = ConflictResolver()
+        >>> conflict = resolver.detect_conflict(higher_tf_data, lower_tf_data)
+        >>> signal = {'direction': 'long', 'entry_price': 100.0}
+        >>> risk = {'max_risk_per_trade': 1.0}
+        >>> adjusted_signal, adjusted_risk = resolver.resolve_conflict(conflict, signal, risk)
+        >>> if adjusted_signal['confidence'] == 'low':
+        ...     print('Caution: Low confidence trade due to timeframe conflict')
+            
+        Edge Cases:
+        -----------
+        - Creates copies of input dictionaries to avoid modifying originals.
+        - Handles unknown conflict types by returning unmodified inputs.
+        - All logic branches should be unit tested (see tests/strategy/test_conflict_resolver.py).
         """
         # Create copies to avoid modifying originals
         signal_copy = signal.copy()

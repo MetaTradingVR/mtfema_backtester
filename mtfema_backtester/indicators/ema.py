@@ -76,7 +76,7 @@ def detect_9ema_extension(data, ema_period=9, threshold=0.01, column='Close'):
     tuple
         (ema_series, extension_series, signals_dict)
     """
-    if data is None or data.empty:
+    if data is None or len(data) == 0:
         logger.warning("Empty data provided for extension detection")
         return pd.Series(), pd.Series(), {
             'has_extension': False,
@@ -97,19 +97,31 @@ def detect_9ema_extension(data, ema_period=9, threshold=0.01, column='Close'):
         latest_ema = ema_series.iloc[-1]
         latest_extension = extension_pct.iloc[-1]
         
-        # Determine extension
-        extended_up = latest_extension > threshold * 100
-        extended_down = latest_extension < -threshold * 100
+        # Determine extension (convert to primitive types to avoid Series truth value ambiguity)
+        latest_extension_value = latest_extension
+        if isinstance(latest_extension, pd.Series):
+            latest_extension_value = latest_extension.iloc[0]
+        extended_up = latest_extension_value > threshold * 100
+        extended_down = latest_extension_value < -threshold * 100
         has_extension = extended_up or extended_down
         
+        # Convert any Series to scalar values
+        latest_price_value = latest_price
+        if isinstance(latest_price, pd.Series):
+            latest_price_value = latest_price.iloc[0]
+            
+        latest_ema_value = latest_ema
+        if isinstance(latest_ema, pd.Series):
+            latest_ema_value = latest_ema.iloc[0]
+        
         signals = {
-            'has_extension': has_extension,
-            'extended_up': extended_up,
-            'extended_down': extended_down,
-            'extension_percentage': abs(latest_extension),
-            'price': latest_price,
-            'ema': latest_ema,
-            'percentage_diff': latest_extension
+            'has_extension': bool(has_extension),
+            'extended_up': bool(extended_up),
+            'extended_down': bool(extended_down),
+            'extension_percentage': abs(latest_extension_value),
+            'price': latest_price_value,
+            'ema': latest_ema_value,
+            'percentage_diff': latest_extension_value
         }
         
         return ema_series, extension_pct, signals
