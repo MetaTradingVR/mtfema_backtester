@@ -1,32 +1,55 @@
 @echo off
-REM Script to commit the MT 9 EMA Backtester Dashboard implementation
+REM MT 9 EMA Backtester Dashboard Commit Script for Windows
+REM This script commits all dashboard changes to the repository
 
-echo Staging dashboard implementation files...
+echo MT 9 EMA Backtester Dashboard Commit Script
+echo =============================================
 
-REM Stage updated documentation
-git add project_status.md
+REM Check if Git is installed
+where git >nul 2>nul
+if %ERRORLEVEL% neq 0 (
+  echo Git is not installed or not in your PATH. Please install Git and try again.
+  exit /b 1
+)
+
+REM Stage dashboard files
+echo Staging dashboard files...
+git add mtfema-dashboard
+git add api_server.py
+git add dashboard_guide.md
+git add commit-dashboard.bat
+git add commit-dashboard.sh
+
+REM Stage additional documentation files
+echo Staging documentation files...
 git add README.md
+git add project_status.md
 
-REM Stage the entire dashboard directory
-git add mtfema-dashboard/
+REM Ask for commit message
+set /p COMMIT_MSG="Enter commit message: "
 
-REM Stage other related files if any
-git add run_web_app.py
+if "%COMMIT_MSG%"=="" (
+  set COMMIT_MSG="Updated MT 9 EMA Backtester Dashboard"
+)
 
-REM Commit the changes with a detailed message
-echo Committing dashboard implementation...
+REM Commit changes
+echo.
+echo Committing with message: %COMMIT_MSG%
+git commit -m %COMMIT_MSG%
 
-git commit -m "Add Next.js dashboard for MT 9 EMA Backtester
+REM Ask if user wants to push changes
+set /p PUSH_CHANGES="Push changes to remote repository? (y/n): "
 
-This commit implements a comprehensive web dashboard using Next.js, Tailwind CSS, and Plotly.js:
+if /i "%PUSH_CHANGES%"=="y" (
+  echo.
+  echo Pushing changes to remote repository...
+  git push
+  echo.
+  echo Changes pushed successfully!
+) else (
+  echo.
+  echo Changes committed locally. Use 'git push' to push them to the remote repository when ready.
+)
 
-- Created intuitive tabbed interface for different visualization views
-- Implemented Parameter Heatmap for optimization analysis
-- Added Parameter Impact Analysis for individual parameter evaluation
-- Created Parallel Coordinates for multi-parameter relationship visualization
-- Built Live Trading Dashboard for real-time performance monitoring
-- Updated documentation to reflect new dashboard features
-- Added installation and usage instructions"
-
-echo Dashboard implementation committed successfully!
-echo Use 'git push' to upload changes to GitHub 
+echo.
+echo Done! 

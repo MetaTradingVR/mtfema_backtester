@@ -1,37 +1,56 @@
 #!/bin/bash
-# Script to commit the MT 9 EMA Backtester Dashboard implementation
+# MT 9 EMA Backtester Dashboard Commit Script for Unix/Linux
+# This script commits all dashboard changes to the repository
 
-# Set terminal colors for better visibility
-GREEN='\033[0;32m'
-BLUE='\033[0;34m'
-NC='\033[0m' # No Color
+echo "MT 9 EMA Backtester Dashboard Commit Script"
+echo "============================================="
 
-echo -e "${BLUE}Staging dashboard implementation files...${NC}"
+# Check if Git is installed
+if ! command -v git &> /dev/null; then
+    echo "Git is not installed. Please install Git and try again."
+    exit 1
+fi
 
-# Stage updated documentation
-git add project_status.md
+# Stage dashboard files
+echo "Staging dashboard files..."
+git add mtfema-dashboard
+git add api_server.py
+git add dashboard_guide.md
+git add commit-dashboard.bat
+git add commit-dashboard.sh
+
+# Stage additional documentation files
+echo "Staging documentation files..."
 git add README.md
+git add project_status.md
 
-# Stage the entire dashboard directory
-git add mtfema-dashboard/
+# Ask for commit message
+echo ""
+read -p "Enter commit message: " COMMIT_MSG
 
-# Stage other related files if any
-git add run_web_app.py
+if [ -z "$COMMIT_MSG" ]; then
+    COMMIT_MSG="Updated MT 9 EMA Backtester Dashboard"
+fi
 
-# Commit the changes with a detailed message
-echo -e "${BLUE}Committing dashboard implementation...${NC}"
+# Commit changes
+echo ""
+echo "Committing with message: $COMMIT_MSG"
+git commit -m "$COMMIT_MSG"
 
-git commit -m "Add Next.js dashboard for MT 9 EMA Backtester
+# Ask if user wants to push changes
+echo ""
+read -p "Push changes to remote repository? (y/n): " PUSH_CHANGES
 
-This commit implements a comprehensive web dashboard using Next.js, Tailwind CSS, and Plotly.js:
+if [[ $PUSH_CHANGES == "y" || $PUSH_CHANGES == "Y" ]]; then
+    echo ""
+    echo "Pushing changes to remote repository..."
+    git push
+    echo ""
+    echo "Changes pushed successfully!"
+else
+    echo ""
+    echo "Changes committed locally. Use 'git push' to push them to the remote repository when ready."
+fi
 
-- Created intuitive tabbed interface for different visualization views
-- Implemented Parameter Heatmap for optimization analysis
-- Added Parameter Impact Analysis for individual parameter evaluation
-- Created Parallel Coordinates for multi-parameter relationship visualization
-- Built Live Trading Dashboard for real-time performance monitoring
-- Updated documentation to reflect new dashboard features
-- Added installation and usage instructions"
-
-echo -e "${GREEN}Dashboard implementation committed successfully!${NC}"
-echo -e "${BLUE}Use 'git push' to upload changes to GitHub${NC}" 
+echo ""
+echo "Done!" 

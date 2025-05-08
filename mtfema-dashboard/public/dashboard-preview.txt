@@ -1,0 +1,7 @@
+This is a placeholder for the dashboard preview image.
+
+To replace with an actual screenshot:
+1. Run the dashboard locally (npm run dev)
+2. Take a screenshot of the dashboard in your browser
+3. Save it as "dashboard-preview.png" in this directory
+4. Delete this text file 

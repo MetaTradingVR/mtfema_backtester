@@ -13,7 +13,7 @@ For the latest project status, implementation progress, and roadmap, see [projec
 - **Risk Management**: Implement position sizing and trade limits
 - **Flexible Integration**: Works with multiple data sources and signal formats
 
-### 📊 Trading Dashboard (Added 2023-05-15)
+### 📊 Trading Dashboard
 
 A modern, interactive web dashboard built with Next.js, Tailwind CSS, and Plotly.js for visualizing backtesting results and monitoring live trading:
 
@@ -25,6 +25,7 @@ A modern, interactive web dashboard built with Next.js, Tailwind CSS, and Plotly
 - **Parameter Optimization Tools**: Visualize how different parameter combinations affect trading performance
 - **Live Trading Interface**: Monitor real-time trading activity and performance
 - **Responsive Design**: Works on desktop, tablet, and mobile devices
+- **Dark/Light Theme Support**: Customizable UI theme based on user preference
 
 #### Running the Dashboard
 
@@ -47,8 +48,11 @@ npm run dev
 - **Parameter Impact Analysis**: Understand which parameters have the greatest influence
 - **Parallel Coordinates**: Explore relationships between multiple parameters simultaneously
 - **Live Trading Dashboard**: Monitor real-time trading with price charts and performance metrics
+- **Trade List**: Detailed view of all executed trades with performance metrics
+- **Monthly Performance Calendar**: Visual representation of returns by month
+- **Equity Curve**: Track account equity over time with drawdown analysis
 
-For more details, see the [dashboard documentation](docs/dashboard_guide.md).
+For more details, see the [dashboard documentation](dashboard_guide.md).
 
 ### 📁 Data Import System
 
