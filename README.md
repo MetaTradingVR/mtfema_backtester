@@ -2,81 +2,151 @@
 # MT 9 EMA Backtester
 
 📋 **Project Status & Roadmap:**
-For the latest, timestamped project status, implementation progress, and roadmap, see [docs/PROJECT_STATUS.md](docs/PROJECT_STATUS.md). This is the canonical source for all planning and progress updates.
+For the latest project status, implementation progress, and roadmap, see [project_status.md](project_status.md).
 
-## 📊 Advanced Visualization Features (Added 2025-05-06)
+## 🚀 Key Components
+
+### 🔄 Trade Execution System
+- **Robust Signal Processing**: Convert strategy signals into executable trades
+- **Position Management**: Track and manage open positions 
+- **Performance Monitoring**: Real-time P&L calculation and metrics tracking
+- **Risk Management**: Implement position sizing and trade limits
+- **Flexible Integration**: Works with multiple data sources and signal formats
+
+### 📊 Trading Dashboard (Added 2023-05-15)
+
+A modern, interactive web dashboard built with Next.js, Tailwind CSS, and Plotly.js for visualizing backtesting results and monitoring live trading:
+
+![MT 9 EMA Dashboard](docs/images/dashboard_preview.png)
+
+#### Dashboard Features
+
+- **Comprehensive Visualization**: Interactive charts and graphs for backtest analysis
+- **Parameter Optimization Tools**: Visualize how different parameter combinations affect trading performance
+- **Live Trading Interface**: Monitor real-time trading activity and performance
+- **Responsive Design**: Works on desktop, tablet, and mobile devices
+
+#### Running the Dashboard
+
+```bash
+# Navigate to the dashboard directory
+cd mtfema-dashboard
+
+# Install dependencies
+npm install
+
+# Start the development server
+npm run dev
+
+# Open http://localhost:3000 in your browser
+```
+
+#### Dashboard Components
+
+- **Parameter Heatmap**: Visualize how different parameter combinations affect performance metrics
+- **Parameter Impact Analysis**: Understand which parameters have the greatest influence
+- **Parallel Coordinates**: Explore relationships between multiple parameters simultaneously
+- **Live Trading Dashboard**: Monitor real-time trading with price charts and performance metrics
+
+For more details, see the [dashboard documentation](docs/dashboard_guide.md).
+
+### 📁 Data Import System
+
+Flexible data handling for multiple sources and formats:
+
+- **Configurable CSV Import**: Map any CSV format to the required structure
+- **Date Format Handling**: Support for various date and time formats
+- **Import Templates**: Save and reuse import configurations
+- **Error Handling**: Robust validation and error reporting
+- **Pre-processing**: Automatic data cleaning and preparation
+
+### 🔍 Parameter Optimization
+
+Comprehensive framework for finding optimal strategy parameters:
+
+- **Grid Search**: Systematically test parameter combinations
+- **Randomized Search**: Efficiently explore large parameter spaces
+- **Parallel Processing**: Utilize multiple cores for faster optimization
+- **Result Tracking**: Save and compare optimization runs
+- **Parameter Importance**: Identify which parameters have the greatest impact
+- **Visualization Tools**: Intuitive visual representation of optimization results
+
+### 📊 Advanced Visualization Features
 
 The backtester includes several advanced visualization tools for comprehensive strategy analysis:
 
-### Extension Map
+#### Extension Map
 Visualizes extensions across all timeframes with a heatmap interface, making it easy to identify multi-timeframe confluence. Color coding shows extension direction (positive/negative) and intensity.
 
-### Signal Timeline
+#### Signal Timeline
 Displays trading signals chronologically across different timeframes, with markers color-coded by direction (long/short) and sized by confidence level. Offers detailed hover information for in-depth signal analysis.
 
-### Progression Tracker
+#### Progression Tracker
 Shows how trades progress through the timeframe hierarchy using an interactive Sankey diagram. Visualizes the flow from entry timeframe to subsequent target timeframes, with link thickness proportional to frequency.
 
-### Conflict Map
+#### Conflict Map
 Highlights detected timeframe conflicts with visual indicators for different conflict types (Consolidation, Direct Correction, Trap Setup). Makes it easy to understand where and why risk adjustments were applied.
 
 All visualizations are built with Plotly for modern, interactive display and can be saved as standalone HTML files for sharing or further analysis.
 
-## 🖥️ Interactive Web Interface (Added 2025-05-06)
+#### Parameter Optimization Visualization
 
-The backtester now features a modern, responsive web interface built with Streamlit:
+The backtester includes powerful parameter optimization visualizations:
 
-### Features
+- **Parameter Heatmaps**: Visualize how different parameter combinations affect key metrics like total return and Sharpe ratio with color-coded intensity maps
+- **Parameter Impact Analysis**: Discover which parameters have the greatest influence on strategy performance with ranked bar charts
+- **Parallel Coordinates**: Analyze relationships between multiple parameters and metrics simultaneously with multi-dimensional visualization
+- **Comprehensive Dashboard**: Export all optimization visualizations as a single HTML dashboard for deeper analysis
 
-- **Interactive Dashboard**: Configure and run backtests from a user-friendly UI with real-time parameter updates
-- **Multi-Tab Interface**: Separate tabs for different visualizations and analysis views
-- **Symbol Search**: Find and select trading symbols with intelligent suggestions
-- **Parameter Adjustment**: Fine-tune strategy parameters with instant feedback
-- **Performance Metrics**: View key performance indicators in a clean, card-based layout
-- **Trade Analysis**: Examine individual trades with detailed statistics and visualizations
+#### Live Trading Dashboard
 
-### Running the Web Interface
+The platform includes a real-time dashboard for monitoring live trading performance:
 
-```bash
-# Install Streamlit if not already installed
-pip install streamlit
+- **Real-time Equity Curve**: Monitor your account balance and drawdowns as they occur
+- **Active Positions Monitor**: Track open positions with live unrealized P&L updates
+- **Signal Timeline**: View recent trading signals with direction and timeframe indicators
+- **Performance Metrics**: Track key statistics like win rate, profit factor, and average trade P&L
+- **Trade Distribution**: Analyze the distribution of winning and losing trades
+- **Control Panel**: Start and stop trading directly from the dashboard interface
 
-# Launch the web interface
-streamlit run mtfema_backtester/run_web_app.py
+### 🔄 Live Trading Features
 
-# The app will open in your default web browser at http://localhost:8501
+The backtester has been extended with full live trading capabilities:
+
+#### Broker Integration
+
+- **Tradovate**: Full integration with Tradovate API for futures trading
+- **Rithmic**: Integration with Rithmic API for professional futures trading
+- **Broker-Agnostic Interface**: Modular design makes adding new brokers straightforward
+
+#### Live Trading Features
+
+- **Real-time Signal Generation**: Apply the same strategy logic from backtesting to live market data
+- **Order Management**: Place, modify, and cancel orders with risk constraints
+- **Position Tracking**: Monitor active positions with unrealized P&L calculations
+- **Account Management**: Track balance, margin, and other account metrics
+- **WebSocket Support**: Real-time data streaming for minimal latency
+
+#### Running Live Trading
+
+```python
+# Create a live trader instance
+from mtfema_backtester.trading.live_trader import LiveTrader
+from mtfema_backtester.trading.broker_factory import BrokerFactory
+from mtfema_backtester.visualization.live_trading_dashboard import create_live_trading_dashboard
+
+# Get broker instance through factory
+broker = BrokerFactory.get_broker('tradovate', api_key='your_key', api_secret='your_secret')
+
+# Create live trader
+live_trader = LiveTrader(broker=broker, symbols=['ES'], timeframes=['5m', '15m', '1h', '4h'])
+
+# Start dashboard
+dashboard = create_live_trading_dashboard(live_trader, port=8051)
+
+# Start trading
+live_trader.start()
 ```
-
-### Customization Options
-
-The web interface provides comprehensive parameter controls:
-- EMA period and threshold adjustments
-- Timeframe selection with hierarchical organization
-- Risk management settings with ATR-based stop loss options
-- Symbol search with popular suggestions
-- Date range selection for backtesting periods
-
-A professional backtesting platform for the Multi-Timeframe 9 EMA Extension Strategy, featuring comprehensive analysis tools, community features, and advanced trading analytics.
-
-## Features
-
-### Core Backtesting
-- Test 9 EMA strategy across multiple timeframes simultaneously
-- Detailed performance metrics and visualizations
-- Customizable parameters and settings
-- Support for various financial instruments and markets
-
-### Community Integration
-- Share trading signals with other users
-- Subscribe to signals from successful traders
-- Reputation system and leaderboards
-- Knowledge sharing and collaboration
-
-### Mobile Support
-- Responsive design that works on any device
-- Optimized charts and tables for mobile viewing
-- Touch-friendly interfaces
-- Offline capabilities
 
 ## Installation
 
@@ -136,7 +206,7 @@ python run_backtest.bat  # Windows
 ./run_backtest.sh        # Unix/Mac
 
 # With custom parameters
-python main.py --symbol ES --start 2023-01-01 --end 2023-12-31 --capital 100000 --risk 0.01
+python run_backtest.py --symbol ES --start 2023-01-01 --end 2023-12-31 --capital 100000 --risk 0.01
 ```
 
 ## Project Structure
@@ -144,16 +214,21 @@ python main.py --symbol ES --start 2023-01-01 --end 2023-12-31 --capital 100000 
 ```
 mtfema_backtester/
 ├── backtesting/         # Core backtesting engine
-├── community/           # Community features
-│   ├── forums/          # Forum functionality
-│   ├── reputation/      # Reputation system
-│   ├── signals/         # Signal subscription system
-│   └── sharing/         # Trading setup sharing
+├── trading/             # Live trading components
+│   ├── broker/          # Broker interfaces
+│   ├── execution/       # Order execution
+│   ├── risk/            # Risk management
+│   └── signals/         # Signal generation
 ├── data/                # Data handling and processing
+│   └── importer.py      # Flexible data import system
 ├── indicators/          # Technical indicators and analysis
 ├── models/              # Position and trade management
+├── optimization/        # Parameter optimization framework
 ├── utils/               # Utility functions
 ├── visualization/       # Charting and data visualization
+│   ├── dashboards/      # Python visualization dashboards
+│   └── optimization/    # Optimization visualization tools
+├── mtfema-dashboard/    # Next.js web dashboard
 ├── docs/                # Documentation
 ├── tests/               # Test suite
 └── examples/            # Usage examples
@@ -164,13 +239,12 @@ mtfema_backtester/
 Detailed documentation is available in the `docs/` directory:
 
 - [Strategy Overview](docs/strategy_overview.md)
-- [Community Features](docs/COMMUNITY_FEATURES.md)
-- [Reputation System](docs/reputation_system.md)
-- [Feature Flags](docs/feature_flags.md)
-- [API Rate Limiting](docs/api_rate_limiting.md)
-- [Enhancement Summary](docs/enhancement_summary.md)
-- [Mobile Accessibility](docs/mobile_accessibility.md)
-- [Security Considerations](docs/security_considerations.md)
+- [Dashboard Guide](docs/dashboard_guide.md)
+- [Live Trading Guide](docs/live_trading.md)
+- [Parameter Optimization](docs/parameter_optimization.md)
+- [Data Import Guide](docs/data_import.md)
+- [API Integration](docs/api_integration.md)
+- [Project Status](project_status.md)
 
 ## License
 
@@ -182,6 +256,20 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 - Inspired by professional trading methodologies and market microstructure analysis
 
 ## Overview
+
+The Multi-Timeframe 9 EMA Extension strategy is a versatile trading approach that leverages price extensions from the 9-period Exponential Moving Average (EMA) across multiple timeframes to identify high-probability trading opportunities. This backtester provides a complete framework for testing and optimizing this strategy on historical data.
+
+### Key Features
+
+- **Multi-Timeframe Analysis**: Simultaneously analyze price action across multiple timeframes
+- **Advanced Extension Detection**: Identify significant price extensions from the 9 EMA
+- **Adaptive Parameters**: Dynamically adjust thresholds based on market volatility
+- **Comprehensive Performance Metrics**: Track and analyze detailed strategy performance
+- **Visualization Tools**: Generate charts and diagrams of strategy behavior
+- **Trade Management**: Simulate realistic trade entries, exits, and position sizing
+- **Customization Options**: Easily modify strategy parameters and rules
+
+## Installation
 
 This backtester is designed to test and optimize the MT 9 EMA Extension Strategy, a sophisticated trading system that capitalizes on price extensions from the 9 EMA across a hierarchical timeframe structure. The strategy systematically identifies, validates, and trades extensions through a progressive targeting framework that moves methodically through the timeframe ladder.
 
@@ -195,6 +283,7 @@ This backtester is designed to test and optimize the MT 9 EMA Extension Strategy
 - **Visualization Tools**: Interactive HTML plots for visual analysis
 - **Configurable Parameters**: Extensively customizable strategy parameters
 - **Flexible Data Sources**: Supports Yahoo Finance with easy extension to other data providers
+- **Live Trading**: Support for real-time trading with broker integrations (Tradovate and Rithmic)
 
 ## Development Status
 
@@ -203,9 +292,10 @@ This backtester is designed to test and optimize the MT 9 EMA Extension Strategy
 - [x] Reclamation detection
 - [x] Configurable parameters system
 - [x] Performance metrics framework
-- [ ] Complete signal generation engine
-- [ ] Progressive targeting implementation
-- [ ] Optimization framework
+- [x] Complete signal generation engine
+- [x] Progressive targeting implementation
+- [x] Optimization framework
+- [x] Live trading with broker integrations
 
 ## Project Status
 
@@ -221,6 +311,7 @@ The project has successfully implemented the following enhancements:
 8. ✅ **Community Features**: System for sharing setups, signals, and participating in forums.
 9. ✅ **Global Accessibility**: Multi-language support and mobile-optimized design.
 10. ✅ **Community Prioritization**: Structured approach to feature prioritization.
+11. ✅ **Live Trading Support**: Integration with brokers (Tradovate and Rithmic) for real-time trading.
 
 ## Acknowledgements
 
@@ -249,6 +340,59 @@ The backtester calculates a comprehensive set of performance metrics:
 - **Average Holding Period**: Time in market analysis
 - **Expectancy**: Average profit/loss per trade
 
+## Live Trading
+
+The MT 9 EMA Backtester now supports live trading through broker integrations:
+
+### Supported Brokers
+- **Tradovate**: Popular among professional futures traders and prop firms
+- **Rithmic**: Advanced order routing system widely used in futures trading
+
+### Live Trading Features
+- Real-time market data processing across multiple timeframes
+- Live signal generation using the same strategy logic as backtesting
+- Automated order execution with customizable risk parameters
+- Position management with dynamic stops and targets
+- WebSocket connections for real-time market data and order updates
+
+### Getting Started with Live Trading
+
+```python
+from mtfema_backtester.trading.live_trader import LiveTrader
+from mtfema_backtester.trading.broker_factory import BrokerFactory
+
+# Create a broker instance
+broker = BrokerFactory.create(
+    broker_name="tradovate",  # or "rithmic"
+    credentials={
+        "username": "your_username",
+        "password": "your_password",
+        "client_id": "your_client_id",
+        "client_secret": "your_client_secret"
+    },
+    is_paper=True  # Use paper trading
+)
+
+# Initialize live trader
+live_trader = LiveTrader(
+    broker=broker,
+    strategy_params={
+        "ema_length": 9,
+        "extension_threshold": 0.5,
+        "reclamation_threshold": 0.2
+    },
+    risk_settings={
+        "account_risk_pct": 1.0,
+        "max_positions": 3
+    },
+    symbols=["ES", "NQ"],
+    timeframes=["5m", "15m", "1h"]
+)
+
+# Start live trading
+live_trader.start()
+```
+
 ## Project Structure
 
 ```
@@ -257,6 +401,12 @@ mtfema_backtester/
 ├── data/               # Data handling modules
 ├── indicators/         # Technical indicators
 ├── strategy/           # Strategy components
+├── trading/            # Live trading components
+│   ├── broker_interface.py  # Broker interface definition
+│   ├── tradovate_broker.py  # Tradovate implementation
+│   ├── rithmic_broker.py    # Rithmic implementation
+│   ├── live_trader.py       # Live trading orchestration
+│   └── strategy_adapter.py  # Adapt strategy to broker
 ├── utils/              # Utility functions
 ├── visualization/      # Plotting and visualization
 ├── main.py             # Main entry point
