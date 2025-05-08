@@ -1,0 +1,28 @@
+MT 9 EMA Backtester Dashboard Preview
+
+This file is a placeholder for the dashboard preview image.
+Please replace this file with an actual screenshot of the dashboard running.
+
+To capture a screenshot:
+1. Run the dashboard: cd mtfema-dashboard && npm run dev
+2. Open http://localhost:3000 in your browser
+3. Take a screenshot of the entire page
+4. Save as "dashboard_preview.png" in this directory
+
+Example:
++--------------------------------------------------+
+|  MT 9 EMA Backtester                  Run Backtest |
++--------------------------------------------------+
+|        |                                         |
+| Symbol |  Overview  Trades  Optimization  Live   |
+| Date   |                                         |
+| Params |  +-------------------------------+      |
+|        |  | Strategy Performance         |      |
+|        |  +-------------------------------+      |
+|        |                                         |
+|        |  +-------------+  +-------------+       |
+|        |  | Equity      |  | Drawdown    |       |
+|        |  | Curve       |  | Analysis    |       |
+|        |  +-------------+  +-------------+       |
+|        |                                         |
++--------------------------------------------------+ 
