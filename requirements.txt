@@ -48,7 +48,27 @@ pytz>=2023.3
 # Visualization Enhancement
 kaleido>=0.2.1  # For plotly static image export
 streamlit-plotly-events>=0.0.6
+# Core dependencies
+numpy==1.24.3
+pandas==2.0.3
+matplotlib==3.7.2
+plotly==5.16.1
 
+# Data handling
+pytz==2023.3
+requests==2.31.0
+
+# Utility
+six==1.16.0
+pyparsing==3.1.1
+pillow==10.0.1
+
+# Development dependencies (optional)
+# pytest==7.4.0
+# pytest-cov==4.1.0
+# flake8==6.1.0
+# black==23.7.0
+# sphinx==7.2.6
 # Testing
 pytest>=7.3.0
 pytest-cov>=4.1.0

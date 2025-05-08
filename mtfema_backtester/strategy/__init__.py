@@ -1,8 +1,11 @@
 """
 Strategy modules for the MT 9 EMA Extension Strategy Backtester.
 
-This package contains the core strategy components including signal generation,
-conflict resolution, and target management.
+This package contains the implementation of the Multi-Timeframe 9 EMA Extension
+trading strategy, including signal generation, extension detection, and trade management.
+
+The core strategy components include signal generation, conflict resolution, 
+and target management.
 """
 
 from .signal_generator import generate_signals

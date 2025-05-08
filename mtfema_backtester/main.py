@@ -150,7 +150,7 @@ def run_test_mode(args, logger):
         tf_data.add_indicator(tf, "ExtensionSignal", signals)
         
         # Calculate Bollinger Bands
-        middle_band, upper_band, lower_band = calculate_bollinger_bands(data, period=20, stdev=2.0)
+        middle_band, upper_band, lower_band = calculate_bollinger_bands(data, period=20, std_dev=2.0)
         if not (middle_band.empty or upper_band.empty or lower_band.empty):
             # Ensure the data is 1-dimensional
             if hasattr(middle_band, 'values'):
@@ -246,7 +246,7 @@ def run_backtest_mode(args, logger):
         tf_data.add_indicator(tf, f"EMA_{args.ema_period}", ema)
         
         # Calculate Bollinger Bands
-        middle_band, upper_band, lower_band = calculate_bollinger_bands(data, period=20, stdev=2.0)
+        middle_band, upper_band, lower_band = calculate_bollinger_bands(data, period=20, std_dev=2.0)
         if not (middle_band.empty or upper_band.empty or lower_band.empty):
             # Ensure the data is 1-dimensional
             if hasattr(middle_band, 'values'):
