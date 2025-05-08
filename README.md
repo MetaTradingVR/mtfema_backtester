@@ -15,7 +15,7 @@ For the latest project status, implementation progress, and roadmap, see [projec
 
 ### 📊 Trading Dashboard
 
-A modern, interactive web dashboard built with Next.js, Tailwind CSS, and Plotly.js for visualizing backtesting results and monitoring live trading:
+A modern, interactive web dashboard built with Next.js, TypeScript, Tailwind CSS, and shadcn/UI for visualizing backtesting results and monitoring live trading:
 
 ![MT 9 EMA Dashboard](docs/images/dashboard_preview.png)
 
@@ -26,6 +26,8 @@ A modern, interactive web dashboard built with Next.js, Tailwind CSS, and Plotly
 - **Live Trading Interface**: Monitor real-time trading activity and performance
 - **Responsive Design**: Works on desktop, tablet, and mobile devices
 - **Dark/Light Theme Support**: Customizable UI theme based on user preference
+- **Interactive Data Analysis**: Filter, sort, and explore trading results
+- **API Integration**: Seamless communication with Python backend
 
 #### Running the Dashboard
 
@@ -44,13 +46,23 @@ npm run dev
 
 #### Dashboard Components
 
-- **Parameter Heatmap**: Visualize how different parameter combinations affect performance metrics
-- **Parameter Impact Analysis**: Understand which parameters have the greatest influence
-- **Parallel Coordinates**: Explore relationships between multiple parameters simultaneously
-- **Live Trading Dashboard**: Monitor real-time trading with price charts and performance metrics
-- **Trade List**: Detailed view of all executed trades with performance metrics
-- **Monthly Performance Calendar**: Visual representation of returns by month
-- **Equity Curve**: Track account equity over time with drawdown analysis
+##### Visualization Components
+- **Parameter Heatmap**: Visualize how different parameter combinations affect performance metrics with customizable metrics and color scales
+- **Parameter Impact Analysis**: Understand which parameters have the greatest influence with statistical significance indicators
+- **Parallel Coordinates**: Explore relationships between multiple parameters simultaneously with interactive filtering
+- **Live Trading Dashboard**: Monitor real-time trading with position tracking and P&L updates
+- **Trade List**: Detailed view of all executed trades with sorting and filtering options
+- **Monthly Performance Calendar**: Visual representation of returns by month with color intensity based on magnitude
+- **Equity Curve**: Track account equity over time with interactive zooming and tooltips
+- **Drawdown Analysis**: Visualize drawdown periods with maximum drawdown highlighting and recovery tracking
+
+##### UI Components
+- **Theme Switcher**: Toggle between light, dark, and system themes with persistent preferences
+- **Tabbed Interface**: Organized views for Overview, Trades, Optimization, and Live Trading
+- **Strategy Controls**: Configure backtest parameters and run simulations
+- **Responsive Sidebar**: Collapsible sidebar for mobile optimization
+- **Performance Cards**: Key metrics display with visual indicators
+- **API Status Indicators**: Visual feedback on backend connectivity
 
 For more details, see the [dashboard documentation](dashboard_guide.md).
 

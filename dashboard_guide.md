@@ -7,6 +7,11 @@ This guide provides detailed instructions for setting up, using, and extending t
 - [Installation](#installation)
 - [Configuration](#configuration)
 - [Using the Dashboard](#using-the-dashboard)
+  - [Overview Tab](#overview-tab)
+  - [Trades Tab](#trades-tab)
+  - [Optimization Tab](#optimization-tab)
+  - [Live Trading Tab](#live-trading-tab)
+  - [Theme Switching](#theme-switching)
 - [API Integration](#api-integration)
 - [Extending the Dashboard](#extending-the-dashboard)
 - [Troubleshooting](#troubleshooting)
@@ -19,8 +24,11 @@ The MT 9 EMA Backtester Dashboard is a web-based interface that provides visuali
 - Analyze trade history and performance patterns
 - Explore parameter optimization results
 - Monitor live trading performance
+- Switch between light and dark themes
 
-The dashboard is built with Next.js, TypeScript, and modern UI components, connecting to a Python FastAPI backend that serves backtest results and live trading data.
+The dashboard is built with Next.js, TypeScript, and modern UI components (Tailwind CSS, shadcn/UI), connecting to a Python FastAPI backend that serves backtest results and live trading data.
+
+![Dashboard Preview](docs/images/dashboard_preview.png)
 
 ## Installation
 
@@ -46,6 +54,8 @@ The dashboard is built with Next.js, TypeScript, and modern UI components, conne
    ```bash
    npm run dev
    ```
+
+4. Open http://localhost:3000 in your browser
 
 ### API Server Setup
 
@@ -76,36 +86,116 @@ Adjust the URL if your API server is running on a different host or port.
 ### Overview Tab
 
 The Overview tab provides high-level performance metrics including:
-- Total return percentage
-- Win rate
-- Sharpe ratio
-- Equity curve visualization
-- Drawdown analysis
-- Monthly performance calendar
+
+- **Total return percentage**: Displayed prominently with color coding (green for positive, red for negative)
+- **Win rate**: Percentage of profitable trades
+- **Sharpe ratio**: Risk-adjusted return metric
+- **Equity curve visualization**: Interactive chart showing account equity over time
+- **Drawdown analysis**: Visual representation of drawdown periods
+- **Monthly performance calendar**: Heat map showing returns by month
+
+![Overview Tab](docs/images/overview_tab.png)
+
+#### Equity Curve Component
+
+The equity curve visualization shows the growth of your trading account over time, with:
+
+- Interactive zooming and panning
+- Tooltips with date and equity value
+- Optional overlay of benchmark comparison
+- Date range filtering
+
+#### Drawdown Analysis Component
+
+The drawdown analysis helps you understand the depth and duration of losing periods:
+
+- Visual representation of drawdown periods
+- Maximum drawdown highlighted
+- Recovery periods marked
+- Statistical summary of drawdowns
+
+#### Monthly Performance Calendar
+
+The monthly performance calendar provides a visual way to identify seasonal patterns:
+
+- Color-coded monthly returns (green for positive, red for negative)
+- Intensity of color represents magnitude of returns
+- Yearly summary statistics
+- Click to view detailed monthly breakdown
 
 ### Trades Tab
 
 The Trades tab displays a detailed list of all trades from your backtest results, including:
+
 - Entry and exit dates
 - Trade direction (Long/Short)
 - Entry and exit prices
 - Profit/loss in both absolute and percentage terms
 - Trade duration
+- Sortable columns for data analysis
+- Filtering options to focus on specific trade types
+
+![Trades Tab](docs/images/trades_tab.png)
 
 ### Optimization Tab
 
 The Optimization tab visualizes parameter combinations and their impact on performance:
-- Parameter heatmap showing the relationship between two parameters
-- Parameter impact charts showing how individual parameters affect returns
-- Parallel coordinates for multi-parameter analysis
+
+- **Parameter heatmap**: Shows the relationship between two parameters (e.g., EMA period and extension threshold) and their impact on performance metrics
+- **Parameter impact charts**: Visualize how individual parameters affect returns
+- **Parallel coordinates**: Multi-parameter analysis for exploring relationships between parameters and metrics
+
+![Optimization Tab](docs/images/optimization_tab.png)
+
+#### Parameter Heatmap Component
+
+The parameter heatmap allows you to visualize how combinations of two parameters affect performance:
+
+- Customizable X and Y axis parameters
+- Selectable performance metric (total return, win rate, Sharpe ratio, etc.)
+- Color intensity indicating performance levels
+- Value labels for precise reading
+- Color scale representing metric range
+
+#### Parameter Impact Component
+
+The parameter impact analysis helps identify which parameters have the greatest influence on strategy performance:
+
+- Bar charts showing performance across parameter values
+- Multiple metrics support (return, win rate, Sharpe ratio)
+- Statistical significance indicators
+- Trend lines to identify optimal parameter ranges
+
+#### Parallel Coordinates Component
+
+The parallel coordinates visualization allows you to explore relationships between multiple parameters simultaneously:
+
+- Multiple parameter axes
+- Color-coded by performance metric
+- Interactive filtering by dragging on axes
+- Highlighting of top-performing configurations
+- Export of optimal parameter sets
 
 ### Live Trading Tab
 
 The Live Trading tab provides real-time monitoring of trading activity:
+
 - Current positions and open trades
 - Account equity and daily P&L
 - Recent signals and executions
 - Performance metrics
+- Trade controls for manual intervention
+
+![Live Trading Tab](docs/images/live_trading_tab.png)
+
+### Theme Switching
+
+The dashboard supports light, dark, and system themes:
+
+- Click the theme switcher in the top navigation bar
+- Choose between Light, Dark, or System
+- System setting follows your operating system preference
+- Theme preference is saved between sessions
 
 ## API Integration
 
@@ -116,6 +206,8 @@ The dashboard communicates with the Python backend through these API endpoints:
 - `/api/backtest/run` - Run a new backtest
 - `/api/optimization/results` - Get optimization results
 - `/api/live/status` - Get live trading status
+
+All API responses are typed using TypeScript interfaces to ensure data consistency.
 
 ## Extending the Dashboard
 
@@ -185,6 +277,27 @@ The dashboard communicates with the Python backend through these API endpoints:
        return {"data": your_data}
    ```
 
+### Customizing Themes
+
+To customize the dashboard's theme:
+
+1. Modify the CSS variables in `src/app/globals.css`:
+   ```css
+   :root {
+     --primary: oklch(0.208 0.042 265.755);
+     --primary-foreground: oklch(0.984 0.003 247.858);
+     /* Add other variables */
+   }
+
+   .dark {
+     --primary: oklch(0.929 0.013 255.508);
+     --primary-foreground: oklch(0.208 0.042 265.755);
+     /* Add other variables */
+   }
+   ```
+
+2. The theme provider in `src/components/ui/theme-provider.tsx` handles theme application.
+
 ## Troubleshooting
 
 ### Dashboard Connection Issues
@@ -203,4 +316,22 @@ If the API server fails to start or respond:
 1. Check that all required Python packages are installed
 2. Verify port 5000 is not in use by another application
 3. Check the API server logs for error messages
-4. Ensure the MT 9 EMA Backtester core modules are properly installed 
+4. Ensure the MT 9 EMA Backtester core modules are properly installed
+
+### Visualization Rendering Issues
+
+If charts or visualizations don't render correctly:
+
+1. Check browser console for JavaScript errors
+2. Ensure data is in the expected format
+3. Try clearing browser cache
+4. Verify browser compatibility (the dashboard works best with Chrome, Firefox, Edge, or Safari)
+
+### Theme Switching Issues
+
+If theme switching doesn't work:
+
+1. Make sure localStorage is enabled in your browser
+2. Check if the ThemeProvider is properly mounted in the layout
+3. Verify CSS variables are correctly defined
+4. Try a different browser to rule out browser-specific issues 
