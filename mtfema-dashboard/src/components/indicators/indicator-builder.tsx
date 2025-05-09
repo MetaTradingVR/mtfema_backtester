@@ -7,7 +7,8 @@
  * Designed with the dashboard's performance issues in mind.
  */
 
-import React, { useState, useCallback, useMemo } from 'react';
+import React, { useState, useCallback, useMemo, useEffect } from 'react';
+import dynamic from 'next/dynamic';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -16,34 +17,38 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import { Table, TableBody, TableCaption, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+// Import Plotly types
+import { PlotParams } from 'react-plotly.js';
+import { Data, Layout, Config } from 'plotly.js';
+// Import API functions
+import { 
+  testIndicator, 
+  createIndicator, 
+  CustomIndicator as ApiCustomIndicator, 
+  IndicatorParameter as ApiIndicatorParameter,
+  IndicatorTestRequest,
+  IndicatorTestResult
+} from '@/lib/api';
+
+// Dynamically import the Plotly component to avoid SSR issues
+const Plot = dynamic(() => import('react-plotly.js'), {
+  ssr: false,
+  loading: () => <div className="w-full h-64 bg-gray-100 animate-pulse rounded-md flex items-center justify-center">Loading chart...</div>
+});
 
 // Indicator Parameter Types
-export interface IndicatorParameter {
-  name: string;
-  type: 'int' | 'float' | 'string' | 'bool';
-  default: any;
-  min?: number;
-  max?: number;
-  options?: string[];
-  description?: string;
-}
+export interface IndicatorParameter extends ApiIndicatorParameter {}
 
 // Custom Indicator Code
-export interface CustomIndicator {
-  name: string;
-  description?: string;
-  parameters: IndicatorParameter[];
-  code: string;
+export interface CustomIndicator extends ApiCustomIndicator {
   test_data?: boolean;
   save: boolean;
+  include_price?: boolean;
 }
 
 // Indicator Test Results
-interface TestResult {
-  success: boolean;
-  message: string;
-  preview?: Record<string, number[]>;
-}
+interface TestResult extends IndicatorTestResult {}
 
 // Indicator Templates - Memoized to reduce re-renders
 const INDICATOR_TEMPLATES = {
@@ -155,6 +160,7 @@ const API_BASE_URL = 'http://localhost:5000/api';
 export interface IndicatorBuilderProps {
   onSave?: (indicator: CustomIndicator) => void;
   onCancel?: () => void;
+  initialData?: CustomIndicator;
 }
 
 // Optimized parameter component to reduce re-renders
@@ -262,13 +268,17 @@ const ParameterItem = React.memo(({
 
 ParameterItem.displayName = 'ParameterItem';
 
-export const IndicatorBuilder = React.memo(({ onSave, onCancel }: IndicatorBuilderProps) => {
+export const IndicatorBuilder = React.memo(({ onSave, onCancel, initialData }: IndicatorBuilderProps) => {
   // State
-  const [name, setName] = useState('CustomIndicator');
-  const [description, setDescription] = useState('A custom indicator');
-  const [parameters, setParameters] = useState<IndicatorParameter[]>(DEFAULT_PARAMETERS);
-  const [code, setCode] = useState(INDICATOR_TEMPLATES['Simple']);
-  const [activeTemplate, setActiveTemplate] = useState('Simple');
+  const [name, setName] = useState(initialData?.name || 'CustomIndicator');
+  const [description, setDescription] = useState(initialData?.description || 'A custom indicator');
+  const [parameters, setParameters] = useState<IndicatorParameter[]>(
+    initialData?.parameters || DEFAULT_PARAMETERS
+  );
+  const [code, setCode] = useState(
+    initialData?.code || INDICATOR_TEMPLATES['Simple']
+  );
+  const [activeTemplate, setActiveTemplate] = useState('Custom');
   const [activeTab, setActiveTab] = useState('code');
   
   // Test results state
@@ -276,6 +286,9 @@ export const IndicatorBuilder = React.memo(({ onSave, onCancel }: IndicatorBuild
   const [testResults, setTestResults] = useState<Record<string, number[]> | null>(null);
   const [errorMessage, setErrorMessage] = useState('');
   const [savedMessage, setSavedMessage] = useState('');
+  // Add validation state
+  const [validationState, setValidationState] = useState<'pending' | 'valid' | 'invalid'>('pending');
+  const [validationErrors, setValidationErrors] = useState<string[]>([]);
   
   // Template options (memoized)
   const templateOptions = useMemo(() => 
@@ -331,45 +344,102 @@ export const IndicatorBuilder = React.memo(({ onSave, onCancel }: IndicatorBuild
     }
   }, []);
   
-  // Test the indicator
+  // Validate the indicator code for syntax errors and parameter consistency
+  const validateIndicatorCode = useCallback(() => {
+    // Reset validation state
+    setValidationErrors([]);
+    setValidationState('pending');
+    
+    const errors: string[] = [];
+    
+    // Basic syntax validation
+    if (!code.includes('class') || !code.includes('def _calculate')) {
+      errors.push("Code must define a class with a _calculate method");
+    }
+    
+    // Check for required methods
+    if (!code.includes('def __init__')) {
+      errors.push("Missing __init__ method in indicator class");
+    }
+    
+    // Validate parameter usage in code
+    parameters.forEach(param => {
+      // Check if each defined parameter is used in the code
+      if (!code.includes(`self.params['${param.name}']`)) {
+        errors.push(`Parameter '${param.name}' is defined but not used in the code`);
+      }
+    });
+    
+    // Check for potentially dangerous code patterns
+    if (code.includes('import os') || code.includes('subprocess') || 
+        code.includes('exec(') || code.includes('eval(')) {
+      errors.push("Code contains potentially unsafe operations");
+    }
+    
+    // Set validation result
+    if (errors.length > 0) {
+      setValidationState('invalid');
+      setValidationErrors(errors);
+      return false;
+    } else {
+      setValidationState('valid');
+      return true;
+    }
+  }, [code, parameters]);
+  
+  // Test the indicator with enhanced validation
   const handleTest = useCallback(async () => {
     setIsLoading(true);
     setErrorMessage('');
     setTestResults(null);
     setSavedMessage('');
     
+    // First run client-side validation
+    const isValid = validateIndicatorCode();
+    if (!isValid) {
+      setIsLoading(false);
+      return;
+    }
+    
     try {
-      const indicatorData: CustomIndicator = {
+      // Prepare test request using interface from API
+      const testRequest: IndicatorTestRequest = {
         name,
         description,
         parameters,
         code,
         test_data: true,
-        save: false
+        save: false,
+        include_price: true
       };
       
-      const response = await fetch(`${API_BASE_URL}/indicators/test`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(indicatorData),
-      });
-      
-      const result = await response.json() as TestResult;
+      // Use API function instead of direct fetch
+      const result = await testIndicator(testRequest);
       
       if (result.success) {
         setTestResults(result.preview || null);
         setActiveTab('results');
+        setValidationState('valid');
       } else {
         setErrorMessage(result.message);
+        setValidationState('invalid');
+        // Parse server-side validation errors if available
+        if (result.message.includes(";")) {
+          setValidationErrors(result.message.split(";").filter(m => m.trim().length > 0));
+        }
       }
     } catch (error) {
-      setErrorMessage(`Error testing indicator: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      // Fallback error handling
+      if (error instanceof Error) {
+        setErrorMessage(`Unexpected error: ${error.message}`);
+      } else {
+        setErrorMessage(`Unexpected error occurred`);
+      }
+      setValidationState('invalid');
     } finally {
       setIsLoading(false);
     }
-  }, [name, description, parameters, code, setActiveTab]);
+  }, [name, description, parameters, code, setActiveTab, validateIndicatorCode]);
   
   // Save the indicator
   const handleSave = useCallback(async () => {
@@ -378,34 +448,35 @@ export const IndicatorBuilder = React.memo(({ onSave, onCancel }: IndicatorBuild
     setSavedMessage('');
     
     try {
-      const indicatorData: CustomIndicator = {
+      // Prepare indicator data for API
+      const indicatorData: ApiCustomIndicator = {
         name,
         description,
         parameters,
         code,
-        save: true
       };
       
-      const response = await fetch(`${API_BASE_URL}/indicators`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(indicatorData),
-      });
-      
-      const result = await response.json() as { success: boolean; message: string };
+      // Use API function instead of direct fetch
+      const result = await createIndicator(indicatorData);
       
       if (result.success) {
         setSavedMessage(`Indicator "${name}" saved successfully!`);
         if (onSave) {
-          onSave(indicatorData);
+          onSave({
+            ...indicatorData,
+            save: true,
+            id: result.id
+          });
         }
       } else {
         setErrorMessage(result.message);
       }
     } catch (error) {
-      setErrorMessage(`Error saving indicator: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      if (error instanceof Error) {
+        setErrorMessage(`Error saving indicator: ${error.message}`);
+      } else {
+        setErrorMessage(`Unknown error occurred`);
+      }
     } finally {
       setIsLoading(false);
     }
@@ -426,10 +497,178 @@ export const IndicatorBuilder = React.memo(({ onSave, onCancel }: IndicatorBuild
     </div>
   ), [parameters, updateParameter, removeParameter]);
   
+  // Render the results visualization
+  const renderResultsVisualization = useMemo(() => {
+    if (!testResults || Object.keys(testResults).length === 0) {
+      return (
+        <div className="flex flex-col items-center justify-center h-64 bg-gray-50 dark:bg-gray-800 rounded-md p-6">
+          <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-gray-400 mb-4">
+            <rect width="18" height="18" x="3" y="3" rx="2" ry="2"></rect>
+            <line x1="3" x2="21" y1="9" y2="9"></line>
+            <path d="m9 16 3-3 3 3"></path>
+          </svg>
+          <p className="text-gray-500 text-center">Run a test to see indicator results visualized here.</p>
+          <p className="text-gray-400 text-sm text-center mt-2">Results will include charts and data tables.</p>
+        </div>
+      );
+    }
+    
+    // Generate dates array if not provided (for sample data)
+    const dates = testResults.dates || 
+      Array.from({ length: Object.values(testResults)[0].length }, 
+        (_, i) => new Date(Date.now() - (30 - i) * 86400000).toISOString().split('T')[0]
+      );
+    
+    // Prepare plot data
+    const plotData: Data[] = [];
+    
+    // Add price data if available
+    if (testResults.price_data) {
+      // Add candlestick chart for price
+      plotData.push({
+        type: 'candlestick',
+        x: dates,
+        open: testResults.price_data.open,
+        high: testResults.price_data.high,
+        low: testResults.price_data.low,
+        close: testResults.price_data.close,
+        name: 'Price',
+        increasing: { line: { color: '#26a69a' } },
+        decreasing: { line: { color: '#ef5350' } },
+        yaxis: 'y'
+      } as unknown as Data);
+    }
+    
+    // Add each indicator result as a line
+    Object.entries(testResults).forEach(([key, values]) => {
+      // Skip non-array properties and price_data
+      if (!Array.isArray(values) || key === 'dates' || key === 'price_data') return;
+      
+      plotData.push({
+        type: 'scatter',
+        mode: 'lines',
+        x: dates,
+        y: values,
+        name: key,
+        yaxis: testResults.price_data ? 'y2' : 'y',
+      } as Data);
+    });
+    
+    // Plot layout
+    const layout: Partial<Layout> = {
+      autosize: true,
+      height: 500,
+      margin: { l: 50, r: 50, t: 50, b: 50 },
+      title: {
+        text: `${name} Indicator Test Results`
+      },
+      xaxis: { 
+        title: {
+          text: 'Date'
+        },
+        rangeslider: { visible: false }
+      },
+      yaxis: {
+        title: {
+          text: testResults.price_data ? 'Price' : 'Value'
+        },
+        domain: testResults.price_data ? [0, 0.7] : [0, 1]
+      },
+      yaxis2: testResults.price_data ? {
+        title: {
+          text: 'Indicator Value'
+        },
+        domain: [0.7, 1],
+        overlaying: false as const
+      } : undefined,
+      legend: { 
+        orientation: 'h' as const,
+        y: -0.2
+      },
+      dragmode: 'zoom' as const,
+      hovermode: 'closest' as const,
+      plot_bgcolor: 'rgba(0,0,0,0)',
+      paper_bgcolor: 'rgba(0,0,0,0)'
+    };
+    
+    // Configuration options
+    const config: Partial<Config> = {
+      responsive: true,
+      scrollZoom: true,
+      displayModeBar: true,
+      displaylogo: false,
+      modeBarButtonsToRemove: ['lasso2d', 'select2d', 'autoScale2d'] as any[]
+    };
+    
+    return (
+      <div className="space-y-6">
+        <div className="border rounded-md bg-white dark:bg-gray-800 p-2">
+          <Plot data={plotData} layout={layout} config={config} className="w-full" />
+        </div>
+        
+        {/* Data preview table */}
+        <div className="border rounded-md overflow-auto">
+          <Table>
+            <TableCaption>Indicator Results Data Preview</TableCaption>
+            <TableHeader>
+              <TableRow>
+                <TableHead className="w-[100px]">Date</TableHead>
+                {Object.keys(testResults).filter(key => 
+                  Array.isArray(testResults[key]) && key !== 'dates' && key !== 'price_data'
+                ).map(key => (
+                  <TableHead key={key}>{key}</TableHead>
+                ))}
+                {testResults.price_data && <TableHead>Price (Close)</TableHead>}
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {dates.slice(-10).map((date, i) => (
+                <TableRow key={date}>
+                  <TableCell className="font-medium">{date}</TableCell>
+                  {Object.entries(testResults).filter(([key]) => 
+                    Array.isArray(testResults[key]) && key !== 'dates' && key !== 'price_data'
+                  ).map(([key, values]) => (
+                    <TableCell key={key}>{values[values.length - 10 + i]?.toFixed(4) || 'N/A'}</TableCell>
+                  ))}
+                  {testResults.price_data && (
+                    <TableCell>
+                      {testResults.price_data.close[testResults.price_data.close.length - 10 + i]?.toFixed(2) || 'N/A'}
+                    </TableCell>
+                  )}
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </div>
+      </div>
+    );
+  }, [testResults, name]);
+  
+  // Effect to update template selection if initialData is provided
+  useEffect(() => {
+    if (initialData) {
+      // Try to determine which template is being used
+      let templateFound = false;
+      Object.entries(INDICATOR_TEMPLATES).forEach(([templateName, templateCode]) => {
+        // Simple heuristic - if code is similar to template, set it
+        if (initialData.code.includes(templateCode.substring(0, 50))) {
+          setActiveTemplate(templateName);
+          templateFound = true;
+        }
+      });
+      
+      if (!templateFound) {
+        setActiveTemplate('Custom');
+      }
+    }
+  }, [initialData]);
+  
   return (
     <Card className="p-6 max-w-4xl mx-auto">
       <div className="flex justify-between items-center mb-6">
-        <h2 className="text-2xl font-bold">Custom Indicator Builder</h2>
+        <h2 className="text-2xl font-bold">
+          {initialData ? 'Edit Indicator' : 'Custom Indicator Builder'}
+        </h2>
         <div className="flex space-x-2">
           <Select value={activeTemplate} onValueChange={loadTemplate}>
             <SelectTrigger className="w-[180px]">
@@ -437,6 +676,7 @@ export const IndicatorBuilder = React.memo(({ onSave, onCancel }: IndicatorBuild
             </SelectTrigger>
             <SelectContent>
               {templateOptions}
+              <SelectItem value="Custom">Custom</SelectItem>
             </SelectContent>
           </Select>
         </div>
@@ -467,12 +707,53 @@ export const IndicatorBuilder = React.memo(({ onSave, onCancel }: IndicatorBuild
       </div>
       
       {/* Tabs */}
-      <Tabs value={activeTab} onValueChange={setActiveTab} className="mb-6">
-        <TabsList className="grid grid-cols-3">
-          <TabsTrigger value="parameters">Parameters</TabsTrigger>
+      <Tabs value={activeTab} onValueChange={setActiveTab} className="mt-6">
+        <TabsList className="grid w-full grid-cols-3">
           <TabsTrigger value="code">Code</TabsTrigger>
-          <TabsTrigger value="results">Results</TabsTrigger>
+          <TabsTrigger value="parameters">Parameters</TabsTrigger>
+          <TabsTrigger value="results">Test Results</TabsTrigger>
         </TabsList>
+        
+        <TabsContent value="code" className="py-4">
+          <div className="space-y-4">
+            <div className="relative">
+              <textarea
+                className="w-full h-96 font-mono text-sm p-4 border rounded bg-gray-50 dark:bg-gray-900"
+                value={code}
+                onChange={(e) => setCode(e.target.value)}
+              />
+              
+              {validationState === 'valid' && (
+                <div className="absolute top-2 right-2 px-2 py-1 bg-green-100 text-green-800 text-xs rounded-full">
+                  Valid ✓
+                </div>
+              )}
+            </div>
+            
+            {/* Display validation errors */}
+            {validationState === 'invalid' && validationErrors.length > 0 && (
+              <Alert variant="destructive">
+                <AlertTitle>Validation Errors</AlertTitle>
+                <AlertDescription>
+                  <ul className="list-disc pl-5 mt-2 space-y-1">
+                    {validationErrors.map((error, idx) => (
+                      <li key={idx} className="text-sm">{error}</li>
+                    ))}
+                  </ul>
+                </AlertDescription>
+              </Alert>
+            )}
+            
+            <div className="flex justify-between items-center">
+              <Button variant="outline" onClick={validateIndicatorCode}>
+                Validate Code
+              </Button>
+              <Button onClick={handleTest} disabled={isLoading}>
+                {isLoading ? "Testing..." : "Test Indicator"}
+              </Button>
+            </div>
+          </div>
+        </TabsContent>
         
         {/* Parameters Tab */}
         <TabsContent value="parameters" className="space-y-4">
@@ -486,107 +767,56 @@ export const IndicatorBuilder = React.memo(({ onSave, onCancel }: IndicatorBuild
           {parameterList}
         </TabsContent>
         
-        {/* Code Tab */}
-        <TabsContent value="code">
-          <Label htmlFor="indicator-code" className="mb-2 block">
-            Indicator Code
-          </Label>
-          <div className="border rounded-md p-1 bg-gray-50 dark:bg-slate-900">
-            <textarea
-              id="indicator-code"
-              value={code}
-              onChange={(e) => setCode(e.target.value)}
-              className="w-full font-mono text-sm p-2 h-[400px] bg-transparent focus:outline-none"
-              spellCheck={false}
-            />
-          </div>
-          <p className="text-xs text-gray-500 mt-1">
-            This code must follow the Indicator class structure from the MT9 EMA backtester framework.
-          </p>
-        </TabsContent>
-        
         {/* Results Tab */}
-        <TabsContent value="results">
-          {errorMessage && (
+        <TabsContent value="results" className="py-4">
+          {errorMessage ? (
             <Alert variant="destructive" className="mb-4">
-              <AlertTitle>Error</AlertTitle>
-              <AlertDescription className="whitespace-pre-wrap font-mono text-xs">
-                {errorMessage}
-              </AlertDescription>
+              <AlertTitle>Error Testing Indicator</AlertTitle>
+              <AlertDescription>{errorMessage}</AlertDescription>
             </Alert>
+          ) : (
+            <>
+              {isLoading ? (
+                <div className="flex justify-center items-center h-64">
+                  <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary"></div>
+                </div>
+              ) : (
+                renderResultsVisualization
+              )}
+            </>
           )}
           
-          {testResults && (
-            <div>
-              <h3 className="text-lg font-medium mb-2">Test Results</h3>
-              <Alert className="mb-4 bg-green-50 border-green-300 text-green-800 dark:bg-green-900 dark:border-green-700 dark:text-green-100">
-                <AlertTitle>Success</AlertTitle>
-                <AlertDescription>
-                  Indicator calculated successfully!
-                </AlertDescription>
-              </Alert>
-              
-              <Accordion type="single" collapsible className="w-full">
-                <AccordionItem value="preview">
-                  <AccordionTrigger>Preview Data</AccordionTrigger>
-                  <AccordionContent>
-                    <div className="overflow-auto max-h-80">
-                      <pre className="text-xs p-4 bg-gray-50 dark:bg-gray-800 rounded-md whitespace-pre-wrap">
-                        {JSON.stringify(testResults, null, 2)}
-                      </pre>
-                    </div>
-                  </AccordionContent>
-                </AccordionItem>
-              </Accordion>
-            </div>
-          )}
-          
-          {savedMessage && (
-            <Alert className="mb-4 bg-blue-50 border-blue-300 text-blue-800 dark:bg-blue-900 dark:border-blue-700 dark:text-blue-100">
-              <AlertTitle>Saved</AlertTitle>
-              <AlertDescription>
-                {savedMessage}
-              </AlertDescription>
-            </Alert>
-          )}
-          
-          {!testResults && !errorMessage && !savedMessage && (
-            <div className="text-center p-12 text-gray-500">
-              <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="mx-auto h-12 w-12 mb-4"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>
-              <p>Click &quot;Test Indicator&quot; to see the results</p>
-            </div>
-          )}
+          <div className="flex justify-end mt-4">
+            <Button onClick={handleTest} disabled={isLoading} className="mr-2">
+              {isLoading ? "Testing..." : "Run Test Again"}
+            </Button>
+            <Button onClick={handleSave} disabled={isLoading || (!testResults && !errorMessage)} variant="default">
+              {isLoading ? "Saving..." : "Save Indicator"}
+            </Button>
+          </div>
         </TabsContent>
       </Tabs>
       
-      {/* Action buttons */}
-      <div className="flex justify-end space-x-2 mt-6">
+      {/* Bottom action buttons */}
+      <div className="flex justify-between mt-6">
         {onCancel && (
           <Button
             variant="outline"
             onClick={onCancel}
-            disabled={isLoading}
           >
             Cancel
           </Button>
         )}
         
-        <Button
-          variant="secondary"
-          onClick={handleTest}
-          disabled={isLoading}
-          className="min-w-[120px]"
-        >
-          {isLoading ? 'Testing...' : 'Test Indicator'}
-        </Button>
-        
-        <Button
-          onClick={handleSave}
-          disabled={isLoading || !!errorMessage}
-          className="min-w-[120px]"
-        >
-          {isLoading ? 'Saving...' : 'Save Indicator'}
-        </Button>
+        <div className="flex space-x-2">
+          <Button
+            variant="default"
+            onClick={handleSave}
+            disabled={isLoading || !!errorMessage}
+          >
+            {isLoading ? 'Saving...' : initialData ? 'Update Indicator' : 'Save Indicator'}
+          </Button>
+        </div>
       </div>
     </Card>
   );

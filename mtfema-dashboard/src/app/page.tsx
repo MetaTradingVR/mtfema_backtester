@@ -12,6 +12,7 @@ import { fetchBacktestResults, fetchOptimizationResults, runBacktest, type Backt
 import { EquityCurve } from "@/components/visualizations/equity-curve";
 import { DrawdownAnalysis } from "@/components/visualizations/drawdown-analysis";
 import { MonthlyPerformance } from "@/components/visualizations/monthly-performance";
+import { SimpleServerIndicator } from "@/components/simple-server-indicator";
 
 export default function Home() {
   const [activeTab, setActiveTab] = useState("overview");

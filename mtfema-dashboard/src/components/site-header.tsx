@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import { ChartBar, GitBranch, Home, Settings, BarChart3 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ThemeToggle } from "@/components/ui/theme-toggle";
+import { SimpleServerIndicator } from "@/components/simple-server-indicator";
 
 export function SiteHeader() {
   const pathname = usePathname();
@@ -73,7 +74,10 @@ export function SiteHeader() {
               {/* Add any additional top-right elements here */}
             </div>
           </div>
-          <ThemeToggle />
+          <div className="flex items-center space-x-2">
+            <SimpleServerIndicator />
+            <ThemeToggle />
+          </div>
         </div>
       </div>
     </header>

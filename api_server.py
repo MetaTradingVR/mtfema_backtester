@@ -44,6 +44,15 @@ except ImportError:
     INDICATORS_AVAILABLE = False
     logging.warning("Indicator modules not available. Using sample data instead.")
 
+# Import pandas-ta for standard indicators
+try:
+    import pandas_ta as ta
+    PANDAS_TA_AVAILABLE = True
+    logging.info("pandas-ta library successfully imported")
+except ImportError:
+    PANDAS_TA_AVAILABLE = False
+    logging.warning("pandas-ta library not available. Standard indicators will use sample data.")
+
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
@@ -131,6 +140,21 @@ class CustomIndicatorCode(BaseModel):
     test_data: Optional[bool] = False  # If True, generate test data
     save: bool = True  # If True, save to registry
 
+# Standard Indicator Models
+class StandardIndicator(BaseModel):
+    id: Optional[str] = None
+    definition_id: str  # References standard indicator definition ID
+    name: str
+    parameters: Dict[str, Any]
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
+
+class StandardIndicatorTestRequest(BaseModel):
+    definition_id: str
+    parameters: Dict[str, Any]
+    test_data: bool = True
+    include_price: bool = True
+
 # Storage for backtest results and optimization results
 # In a production app, this would use a database
 RESULTS_DIR = Path("results")
@@ -139,6 +163,10 @@ RESULTS_DIR.mkdir(exist_ok=True)
 # Storage for custom indicators
 INDICATORS_DIR = Path("indicators")
 INDICATORS_DIR.mkdir(exist_ok=True)
+
+# Storage for standard indicators
+STANDARD_INDICATORS_DIR = Path("indicators/standard")
+STANDARD_INDICATORS_DIR.mkdir(exist_ok=True, parents=True)
 
 # Keep track of running backtests and optimizations
 active_backtests: Dict[str, Dict[str, Any]] = {}
@@ -1277,6 +1305,778 @@ def load_custom_indicators():
                 logger.error(f"Error loading custom indicator {indicator_file}: {str(e)}")
     except Exception as e:
         logger.error(f"Error loading custom indicators: {str(e)}")
+
+# New routes for standard indicators from libraries like pandas-ta
+@app.get("/api/indicators/standard-catalog")
+def get_standard_indicators_catalog():
+    """Get the catalog of available standard indicators from pandas-ta"""
+    if not PANDAS_TA_AVAILABLE:
+        # Return sample data if pandas-ta is not available
+        return generate_sample_standard_indicators_catalog()
+    
+    try:
+        # Create a comprehensive alphabetical list of indicators
+        # Start with most common indicator categories
+        categories = []
+        all_indicators = []
+        
+        # List of all indicators we want to expose from pandas-ta
+        # This approach ensures we have a complete list without dynamic import issues
+        indicators_list = [
+            # Moving Averages
+            {"id": "sma", "name": "Simple Moving Average (SMA)", "category": "moving_averages", 
+             "params": [{"name": "length", "type": "int", "default": 20, "min": 2, "max": 500}]},
+            {"id": "ema", "name": "Exponential Moving Average (EMA)", "category": "moving_averages", 
+             "params": [{"name": "length", "type": "int", "default": 20, "min": 2, "max": 500}]},
+            {"id": "dema", "name": "Double Exponential Moving Average", "category": "moving_averages", 
+             "params": [{"name": "length", "type": "int", "default": 20, "min": 2, "max": 500}]},
+            {"id": "tema", "name": "Triple Exponential Moving Average", "category": "moving_averages", 
+             "params": [{"name": "length", "type": "int", "default": 20, "min": 2, "max": 500}]},
+            {"id": "trima", "name": "Triangular Moving Average", "category": "moving_averages", 
+             "params": [{"name": "length", "type": "int", "default": 20, "min": 2, "max": 500}]},
+            {"id": "wma", "name": "Weighted Moving Average", "category": "moving_averages", 
+             "params": [{"name": "length", "type": "int", "default": 20, "min": 2, "max": 500}]},
+            {"id": "hma", "name": "Hull Moving Average", "category": "moving_averages", 
+             "params": [{"name": "length", "type": "int", "default": 20, "min": 2, "max": 500}]},
+            {"id": "zlma", "name": "Zero Lag Moving Average", "category": "moving_averages", 
+             "params": [{"name": "length", "type": "int", "default": 20, "min": 2, "max": 500}]},
+            {"id": "vwma", "name": "Volume Weighted Moving Average", "category": "moving_averages", 
+             "params": [{"name": "length", "type": "int", "default": 20, "min": 2, "max": 500}]},
+            {"id": "vwap", "name": "Volume Weighted Average Price", "category": "moving_averages", 
+             "params": [{"name": "anchor", "type": "string", "default": "D", "options": ["D", "W", "M"]}]},
+            
+            # Overlap
+            {"id": "bbands", "name": "Bollinger Bands", "category": "overlap", 
+             "params": [
+                 {"name": "length", "type": "int", "default": 20, "min": 2, "max": 500},
+                 {"name": "std", "type": "float", "default": 2.0, "min": 0.1, "max": 10.0}
+             ]},
+            {"id": "kc", "name": "Keltner Channels", "category": "overlap", 
+             "params": [
+                 {"name": "length", "type": "int", "default": 20, "min": 2, "max": 500},
+                 {"name": "scalar", "type": "float", "default": 2.0, "min": 0.1, "max": 10.0}
+             ]},
+            {"id": "donchian", "name": "Donchian Channels", "category": "overlap", 
+             "params": [{"name": "length", "type": "int", "default": 20, "min": 2, "max": 500}]},
+            {"id": "ichimoku", "name": "Ichimoku Cloud", "category": "overlap", 
+             "params": [
+                 {"name": "tenkan", "type": "int", "default": 9, "min": 2, "max": 100},
+                 {"name": "kijun", "type": "int", "default": 26, "min": 2, "max": 100},
+                 {"name": "senkou", "type": "int", "default": 52, "min": 2, "max": 100}
+             ]},
+            
+            # Momentum
+            {"id": "macd", "name": "MACD", "category": "momentum", 
+             "params": [
+                 {"name": "fast", "type": "int", "default": 12, "min": 2, "max": 100},
+                 {"name": "slow", "type": "int", "default": 26, "min": 2, "max": 100},
+                 {"name": "signal", "type": "int", "default": 9, "min": 2, "max": 50}
+             ]},
+            {"id": "rsi", "name": "Relative Strength Index", "category": "momentum", 
+             "params": [{"name": "length", "type": "int", "default": 14, "min": 2, "max": 100}]},
+            {"id": "stoch", "name": "Stochastic Oscillator", "category": "momentum", 
+             "params": [
+                 {"name": "k", "type": "int", "default": 14, "min": 1, "max": 100},
+                 {"name": "d", "type": "int", "default": 3, "min": 1, "max": 100}
+             ]},
+            {"id": "cmo", "name": "Chande Momentum Oscillator", "category": "momentum", 
+             "params": [{"name": "length", "type": "int", "default": 14, "min": 2, "max": 100}]},
+            {"id": "cci", "name": "Commodity Channel Index", "category": "momentum", 
+             "params": [{"name": "length", "type": "int", "default": 14, "min": 2, "max": 100}]},
+            {"id": "willr", "name": "Williams %R", "category": "momentum", 
+             "params": [{"name": "length", "type": "int", "default": 14, "min": 2, "max": 100}]},
+            {"id": "mfi", "name": "Money Flow Index", "category": "momentum", 
+             "params": [{"name": "length", "type": "int", "default": 14, "min": 2, "max": 100}]},
+            {"id": "tsi", "name": "True Strength Index", "category": "momentum", 
+             "params": [
+                 {"name": "fast", "type": "int", "default": 13, "min": 1, "max": 100},
+                 {"name": "slow", "type": "int", "default": 25, "min": 1, "max": 100}
+             ]},
+            {"id": "coppock", "name": "Coppock Curve", "category": "momentum", 
+             "params": [
+                 {"name": "length", "type": "int", "default": 10, "min": 2, "max": 100},
+                 {"name": "fast", "type": "int", "default": 11, "min": 2, "max": 100},
+                 {"name": "slow", "type": "int", "default": 14, "min": 2, "max": 100}
+             ]},
+            {"id": "ppo", "name": "Percentage Price Oscillator", "category": "momentum", 
+             "params": [
+                 {"name": "fast", "type": "int", "default": 12, "min": 2, "max": 100},
+                 {"name": "slow", "type": "int", "default": 26, "min": 2, "max": 100},
+                 {"name": "signal", "type": "int", "default": 9, "min": 2, "max": 50}
+             ]},
+            {"id": "roc", "name": "Rate of Change", "category": "momentum", 
+             "params": [{"name": "length", "type": "int", "default": 10, "min": 1, "max": 100}]},
+            {"id": "mom", "name": "Momentum", "category": "momentum", 
+             "params": [{"name": "length", "type": "int", "default": 10, "min": 1, "max": 100}]},
+            {"id": "apo", "name": "Absolute Price Oscillator", "category": "momentum", 
+             "params": [
+                 {"name": "fast", "type": "int", "default": 12, "min": 2, "max": 100},
+                 {"name": "slow", "type": "int", "default": 26, "min": 2, "max": 100}
+             ]},
+             
+            # Trend
+            {"id": "adx", "name": "Average Directional Index", "category": "trend", 
+             "params": [{"name": "length", "type": "int", "default": 14, "min": 2, "max": 100}]},
+            {"id": "aroon", "name": "Aroon", "category": "trend", 
+             "params": [{"name": "length", "type": "int", "default": 14, "min": 2, "max": 100}]},
+            {"id": "psar", "name": "Parabolic SAR", "category": "trend", 
+             "params": [
+                 {"name": "acceleration", "type": "float", "default": 0.02, "min": 0.01, "max": 0.5},
+                 {"name": "max_acceleration", "type": "float", "default": 0.2, "min": 0.1, "max": 1.0}
+             ]},
+            {"id": "supertrend", "name": "SuperTrend", "category": "trend", 
+             "params": [
+                 {"name": "length", "type": "int", "default": 10, "min": 1, "max": 100},
+                 {"name": "multiplier", "type": "float", "default": 3.0, "min": 0.5, "max": 10.0}
+             ]},
+            {"id": "vortex", "name": "Vortex Indicator", "category": "trend", 
+             "params": [{"name": "length", "type": "int", "default": 14, "min": 2, "max": 100}]},
+             
+            # Volatility
+            {"id": "atr", "name": "Average True Range", "category": "volatility", 
+             "params": [{"name": "length", "type": "int", "default": 14, "min": 1, "max": 100}]},
+            {"id": "natr", "name": "Normalized ATR", "category": "volatility", 
+             "params": [{"name": "length", "type": "int", "default": 14, "min": 1, "max": 100}]},
+            {"id": "true_range", "name": "True Range", "category": "volatility", "params": []},
+            {"id": "massi", "name": "Mass Index", "category": "volatility", 
+             "params": [
+                 {"name": "fast", "type": "int", "default": 9, "min": 1, "max": 100},
+                 {"name": "slow", "type": "int", "default": 25, "min": 1, "max": 100}
+             ]},
+
+            # Volume
+            {"id": "obv", "name": "On-Balance Volume", "category": "volume", "params": []},
+            {"id": "cmf", "name": "Chaikin Money Flow", "category": "volume", 
+             "params": [{"name": "length", "type": "int", "default": 20, "min": 2, "max": 100}]},
+            {"id": "ad", "name": "Accumulation/Distribution", "category": "volume", "params": []},
+            {"id": "eom", "name": "Ease of Movement", "category": "volume", 
+             "params": [
+                 {"name": "length", "type": "int", "default": 14, "min": 2, "max": 100},
+                 {"name": "divisor", "type": "int", "default": 100000000, "min": 1, "max": 1000000000}
+             ]},
+            {"id": "pvt", "name": "Price Volume Trend", "category": "volume", "params": []},
+            {"id": "vp", "name": "Volume Profile", "category": "volume", 
+             "params": [{"name": "bins", "type": "int", "default": 20, "min": 5, "max": 100}]},
+
+            # Statistics
+            {"id": "stdev", "name": "Standard Deviation", "category": "statistics", 
+             "params": [{"name": "length", "type": "int", "default": 20, "min": 2, "max": 500}]},
+            {"id": "zscore", "name": "Z-Score", "category": "statistics", 
+             "params": [{"name": "length", "type": "int", "default": 20, "min": 2, "max": 500}]},
+            {"id": "variance", "name": "Variance", "category": "statistics", 
+             "params": [{"name": "length", "type": "int", "default": 20, "min": 2, "max": 500}]},
+        ]
+        
+        # Sort alphabetically by name for easy browsing
+        sorted_indicators = sorted(indicators_list, key=lambda x: x["name"])
+        
+        # Process each indicator
+        for indicator_info in sorted_indicators:
+            # Convert our simplified params format to the full format expected by frontend
+            parameters = []
+            for param in indicator_info.get("params", []):
+                parameter = {
+                    "name": param["name"],
+                    "type": param["type"],
+                    "default": param["default"],
+                    "description": f"{param['name']} parameter"
+                }
+                
+                if "min" in param:
+                    parameter["min"] = param["min"]
+                if "max" in param:
+                    parameter["max"] = param["max"]
+                if "options" in param:
+                    parameter["options"] = param["options"]
+                
+                parameters.append(parameter)
+            
+            # Create the full indicator definition
+            indicator = {
+                "id": indicator_info["id"],
+                "name": indicator_info["name"],
+                "category": indicator_info["category"],
+                "description": f"{indicator_info['name']} technical indicator",
+                "parameters": parameters,
+                "inputs": ["close"] if not any(x in indicator_info["id"] for x in ["atr", "psar", "supertrend", "donchian", "ichimoku", "cci", "willr"]) else ["high", "low", "close"],
+                "outputs": [indicator_info["id"]],
+                "source_library": "pandas_ta"
+            }
+            
+            # Add volume as an input if it's a volume indicator
+            if indicator_info["category"] in ["volume"]:
+                if "inputs" in indicator and "volume" not in indicator["inputs"]:
+                    indicator["inputs"].append("volume")
+            
+            all_indicators.append(indicator)
+        
+        # Group indicators by category for organization
+        category_map = {
+            "moving_averages": {"id": "moving_averages", "name": "Moving Averages", "description": "Various types of moving averages", "indicators": []},
+            "overlap": {"id": "overlap", "name": "Overlay Indicators", "description": "Indicators that overlay on price", "indicators": []},
+            "momentum": {"id": "momentum", "name": "Momentum Indicators", "description": "Indicators that measure momentum", "indicators": []},
+            "trend": {"id": "trend", "name": "Trend Indicators", "description": "Indicators that measure trend direction and strength", "indicators": []},
+            "volatility": {"id": "volatility", "name": "Volatility Indicators", "description": "Indicators that measure volatility", "indicators": []},
+            "volume": {"id": "volume", "name": "Volume Indicators", "description": "Indicators that use volume", "indicators": []},
+            "statistics": {"id": "statistics", "name": "Statistical Indicators", "description": "Statistical measures and indicators", "indicators": []}
+        }
+        
+        # Assign indicators to categories
+        for indicator in all_indicators:
+            category = indicator["category"]
+            if category in category_map:
+                category_map[category]["indicators"].append(indicator)
+        
+        # Create a special "all" category with alphabetically sorted indicators
+        all_category = {
+            "id": "all",
+            "name": "All Indicators (A-Z)",
+            "description": "All available indicators in alphabetical order",
+            "indicators": all_indicators
+        }
+        
+        # Build the final categories list
+        categories = [all_category]  # Put "All" category first
+        
+        # Add all non-empty categories
+        for category_id in ["moving_averages", "overlap", "momentum", "trend", "volatility", "volume", "statistics"]:
+            if category_map[category_id]["indicators"]:
+                categories.append(category_map[category_id])
+        
+        return categories
+    except Exception as e:
+        logger.error(f"Error getting standard indicators catalog: {str(e)}")
+        return []
+
+@app.post("/api/indicators/standard/test")
+def test_standard_indicator(request: StandardIndicatorTestRequest):
+    """Test a standard indicator with the provided configuration"""
+    try:
+        indicator_id = request.definition_id
+        parameters = request.parameters
+        
+        if not indicator_id:
+            return {"error": "Missing indicator_id"}
+        
+        # Generate sample data for testing
+        df = generate_sample_data(300)  # 300 rows of sample data
+        
+        # Apply the indicator based on its ID
+        # This is where we need to map the indicator ID to the appropriate pandas_ta function
+        if not PANDAS_TA_AVAILABLE:
+            return {"error": "pandas_ta library is not available"}
+        
+        # Common parameters for most indicators
+        length = parameters.get("length", 20)
+        
+        # Handle different indicator types
+        result_df = None
+        
+        # Moving Averages
+        if indicator_id in ["sma", "ema", "dema", "tema", "trima", "wma", "zlma"]:
+            ma_func = getattr(ta, indicator_id)
+            result_df = df.copy()
+            result_df[indicator_id] = ma_func(df["close"], length=length)
+            
+        elif indicator_id == "hma":
+            result_df = df.copy()
+            result_df["hma"] = ta.hma(df["close"], length=length)
+            
+        elif indicator_id == "vwma":
+            result_df = df.copy()
+            result_df["vwma"] = ta.vwma(df["close"], df["volume"], length=length)
+            
+        elif indicator_id == "vwap":
+            result_df = df.copy()
+            anchor = parameters.get("anchor", "D")
+            result_df["vwap"] = ta.vwap(df["high"], df["low"], df["close"], df["volume"], anchor=anchor)
+            
+        # Overlap indicators
+        elif indicator_id == "bbands":
+            std = parameters.get("std", 2.0)
+            result_df = df.copy()
+            bbands = ta.bbands(df["close"], length=length, std=std)
+            result_df["bbands_upper"] = bbands["BBU_" + str(length) + "_" + str(std)]
+            result_df["bbands_middle"] = bbands["BBM_" + str(length) + "_" + str(std)]
+            result_df["bbands_lower"] = bbands["BBL_" + str(length) + "_" + str(std)]
+            
+        elif indicator_id == "kc":
+            scalar = parameters.get("scalar", 2.0)
+            result_df = df.copy()
+            kc = ta.kc(df["high"], df["low"], df["close"], length=length, scalar=scalar)
+            # Extract column names from result and map to expected output names
+            kc_cols = kc.columns
+            kc_upper_col = [col for col in kc_cols if "KCU" in col][0]
+            kc_lower_col = [col for col in kc_cols if "KCL" in col][0]
+            kc_middle_col = [col for col in kc_cols if "KCB" in col][0]
+            result_df["kc_upper"] = kc[kc_upper_col]
+            result_df["kc_lower"] = kc[kc_lower_col]
+            result_df["kc_middle"] = kc[kc_middle_col]
+            
+        elif indicator_id == "donchian":
+            result_df = df.copy()
+            dc = ta.donchian(df["high"], df["low"], length=length)
+            # Extract column names
+            dc_cols = dc.columns
+            dc_upper_col = [col for col in dc_cols if "DCU" in col][0]
+            dc_lower_col = [col for col in dc_cols if "DCL" in col][0]
+            dc_middle_col = [col for col in dc_cols if "DCM" in col][0]
+            result_df["donchian_upper"] = dc[dc_upper_col]
+            result_df["donchian_lower"] = dc[dc_lower_col]
+            result_df["donchian_middle"] = dc[dc_middle_col]
+            
+        elif indicator_id == "ichimoku":
+            tenkan = parameters.get("tenkan", 9)
+            kijun = parameters.get("kijun", 26)
+            senkou = parameters.get("senkou", 52)
+            result_df = df.copy()
+            ichimoku = ta.ichimoku(df["high"], df["low"], df["close"], 
+                                  tenkan=tenkan, kijun=kijun, senkou=senkou)
+            # Map ichimoku components to results
+            for col in ichimoku.columns:
+                result_df[col.lower()] = ichimoku[col]
+            
+        # Momentum indicators
+        elif indicator_id == "macd":
+            fast = parameters.get("fast", 12)
+            slow = parameters.get("slow", 26)
+            signal = parameters.get("signal", 9)
+            result_df = df.copy()
+            macd = ta.macd(df["close"], fast=fast, slow=slow, signal=signal)
+            # Extract column names
+            macd_cols = macd.columns
+            result_df["macd"] = macd[macd_cols[0]]
+            result_df["macd_signal"] = macd[macd_cols[1]]
+            result_df["macd_histogram"] = macd[macd_cols[2]]
+            
+        elif indicator_id == "rsi":
+            result_df = df.copy()
+            result_df["rsi"] = ta.rsi(df["close"], length=length)
+            
+        elif indicator_id == "stoch":
+            k = parameters.get("k", 14)
+            d = parameters.get("d", 3)
+            result_df = df.copy()
+            stoch = ta.stoch(df["high"], df["low"], df["close"], k=k, d=d)
+            # Extract column names
+            stoch_cols = stoch.columns
+            result_df["stoch_k"] = stoch[stoch_cols[0]]
+            result_df["stoch_d"] = stoch[stoch_cols[1]]
+            
+        elif indicator_id == "cmo":
+            result_df = df.copy()
+            result_df["cmo"] = ta.cmo(df["close"], length=length)
+            
+        elif indicator_id == "cci":
+            result_df = df.copy()
+            result_df["cci"] = ta.cci(df["high"], df["low"], df["close"], length=length)
+            
+        elif indicator_id == "willr":
+            result_df = df.copy()
+            result_df["willr"] = ta.willr(df["high"], df["low"], df["close"], length=length)
+            
+        elif indicator_id == "mfi":
+            result_df = df.copy()
+            result_df["mfi"] = ta.mfi(df["high"], df["low"], df["close"], df["volume"], length=length)
+            
+        elif indicator_id == "tsi":
+            fast = parameters.get("fast", 13)
+            slow = parameters.get("slow", 25)
+            result_df = df.copy()
+            tsi = ta.tsi(df["close"], fast=fast, slow=slow)
+            result_df["tsi"] = tsi
+            
+        elif indicator_id == "coppock":
+            fast = parameters.get("fast", 11)
+            slow = parameters.get("slow", 14)
+            result_df = df.copy()
+            result_df["coppock"] = ta.coppock(df["close"], length=length, fast=fast, slow=slow)
+            
+        elif indicator_id in ["ppo", "apo"]:
+            fast = parameters.get("fast", 12)
+            slow = parameters.get("slow", 26)
+            result_df = df.copy()
+            indicator_func = getattr(ta, indicator_id)
+            if indicator_id == "ppo":
+                signal = parameters.get("signal", 9)
+                ppo = indicator_func(df["close"], fast=fast, slow=slow, signal=signal)
+                ppo_cols = ppo.columns
+                result_df["ppo"] = ppo[ppo_cols[0]]
+                result_df["ppo_signal"] = ppo[ppo_cols[1]]
+                result_df["ppo_histogram"] = ppo[ppo_cols[2]]
+            else:
+                result_df[indicator_id] = indicator_func(df["close"], fast=fast, slow=slow)
+            
+        elif indicator_id in ["roc", "mom"]:
+            result_df = df.copy()
+            indicator_func = getattr(ta, indicator_id)
+            result_df[indicator_id] = indicator_func(df["close"], length=length)
+            
+        # Trend indicators
+        elif indicator_id == "adx":
+            result_df = df.copy()
+            adx = ta.adx(df["high"], df["low"], df["close"], length=length)
+            # Extract column names
+            adx_cols = adx.columns
+            for col in adx_cols:
+                result_df[col.lower()] = adx[col]
+            
+        elif indicator_id == "aroon":
+            result_df = df.copy()
+            aroon = ta.aroon(df["high"], df["low"], length=length)
+            # Extract column names
+            aroon_cols = aroon.columns
+            result_df["aroon_up"] = aroon[aroon_cols[0]]
+            result_df["aroon_down"] = aroon[aroon_cols[1]]
+            result_df["aroon_osc"] = aroon[aroon_cols[2]]
+            
+        elif indicator_id == "psar":
+            acceleration = parameters.get("acceleration", 0.02)
+            max_acceleration = parameters.get("max_acceleration", 0.2)
+            result_df = df.copy()
+            result_df["psar"] = ta.psar(df["high"], df["low"], df["close"], 
+                                       acceleration=acceleration, 
+                                       max_acceleration=max_acceleration)
+            
+        elif indicator_id == "supertrend":
+            length = parameters.get("length", 10)
+            multiplier = parameters.get("multiplier", 3.0)
+            result_df = df.copy()
+            supertrend = ta.supertrend(df["high"], df["low"], df["close"], 
+                                      length=length, multiplier=multiplier)
+            # Extract column names
+            supertrend_cols = supertrend.columns
+            result_df["supertrend"] = supertrend[supertrend_cols[0]]
+            result_df["direction"] = supertrend[supertrend_cols[1]]
+            
+        elif indicator_id == "vortex":
+            result_df = df.copy()
+            vortex = ta.vortex(df["high"], df["low"], df["close"], length=length)
+            # Extract column names
+            vortex_cols = vortex.columns
+            result_df["vortex_pos"] = vortex[vortex_cols[0]]
+            result_df["vortex_neg"] = vortex[vortex_cols[1]]
+            result_df["vortex_diff"] = vortex[vortex_cols[2]]
+            
+        # Volatility indicators
+        elif indicator_id == "atr":
+            result_df = df.copy()
+            result_df["atr"] = ta.atr(df["high"], df["low"], df["close"], length=length)
+            
+        elif indicator_id == "natr":
+            result_df = df.copy()
+            result_df["natr"] = ta.natr(df["high"], df["low"], df["close"], length=length)
+            
+        elif indicator_id == "true_range":
+            result_df = df.copy()
+            result_df["true_range"] = ta.true_range(df["high"], df["low"], df["close"])
+            
+        elif indicator_id == "massi":
+            fast = parameters.get("fast", 9)
+            slow = parameters.get("slow", 25)
+            result_df = df.copy()
+            result_df["massi"] = ta.massi(df["high"], df["low"], fast=fast, slow=slow)
+            
+        # Volume indicators
+        elif indicator_id == "obv":
+            result_df = df.copy()
+            result_df["obv"] = ta.obv(df["close"], df["volume"])
+            
+        elif indicator_id == "cmf":
+            result_df = df.copy()
+            result_df["cmf"] = ta.cmf(df["high"], df["low"], df["close"], df["volume"], length=length)
+            
+        elif indicator_id == "ad":
+            result_df = df.copy()
+            result_df["ad"] = ta.ad(df["high"], df["low"], df["close"], df["volume"])
+            
+        elif indicator_id == "eom":
+            divisor = parameters.get("divisor", 100000000)
+            result_df = df.copy()
+            result_df["eom"] = ta.eom(df["high"], df["low"], df["close"], df["volume"], 
+                                     length=length, divisor=divisor)
+            
+        elif indicator_id == "pvt":
+            result_df = df.copy()
+            result_df["pvt"] = ta.pvt(df["close"], df["volume"])
+            
+        # Statistical indicators
+        elif indicator_id in ["stdev", "variance", "zscore"]:
+            result_df = df.copy()
+            indicator_func = getattr(ta, indicator_id)
+            result_df[indicator_id] = indicator_func(df["close"], length=length)
+            
+        else:
+            return {
+                "success": False,
+                "message": f"Unknown indicator: {indicator_id}"
+            }
+        
+        if result_df is None:
+            return {
+                "success": False,
+                "message": "Failed to compute indicator"
+            }
+            
+        # Convert the result to JSON for response
+        # Drop any NaN values which can't be serialized to JSON
+        result_df = result_df.fillna(None)
+        
+        # Format the response to match what the frontend expects
+        preview = {}
+        
+        # Get the last 10 rows of indicator data
+        # Skip the OHLCV columns
+        skip_cols = ["open", "high", "low", "close", "volume", "timestamp"]
+        indicator_cols = [col for col in result_df.columns if col not in skip_cols]
+        
+        for col in indicator_cols:
+            preview[col] = result_df[col].tail(10).tolist()
+            
+        response = {
+            "success": True,
+            "message": "Indicator calculated successfully",
+            "preview": preview
+        }
+        
+        # Include price data if requested
+        if request.include_price:
+            response["price_data"] = {
+                "open": result_df["open"].tail(10).tolist(),
+                "high": result_df["high"].tail(10).tolist(),
+                "low": result_df["low"].tail(10).tolist(),
+                "close": result_df["close"].tail(10).tolist(),
+                "volume": result_df["volume"].tail(10).tolist()
+            }
+            response["dates"] = [str(d) for d in result_df["timestamp"].tail(10).tolist()]
+            
+        return response
+        
+    except Exception as e:
+        logger.error(f"Error testing standard indicator: {str(e)}")
+        import traceback
+        logger.error(traceback.format_exc())
+        return {
+            "success": False,
+            "message": f"Error testing indicator: {str(e)}"
+        }
+
+@app.post("/api/indicators/standard/save")
+def save_standard_indicator(indicator: StandardIndicator):
+    """Save a configured standard indicator"""
+    if not PANDAS_TA_AVAILABLE:
+        # Return success even in simulation mode
+        return {
+            "success": True,
+            "message": "Standard indicator saved (simulation)",
+            "id": str(uuid.uuid4())
+        }
+    
+    try:
+        # Generate a unique ID if not provided
+        if not indicator.id:
+            indicator.id = str(uuid.uuid4())
+            
+        # Add timestamps
+        now = datetime.now().isoformat()
+        indicator.created_at = now
+        indicator.updated_at = now
+        
+        # Save to disk
+        indicator_path = STANDARD_INDICATORS_DIR / f"{indicator.id}.json"
+        with open(indicator_path, "w") as f:
+            f.write(json.dumps(indicator.dict(), indent=2))
+            
+        return {
+            "success": True,
+            "message": f"Standard indicator {indicator.name} saved successfully",
+            "id": indicator.id
+        }
+    except Exception as e:
+        logger.error(f"Error saving standard indicator: {str(e)}")
+        return {
+            "success": False,
+            "message": f"Error saving indicator: {str(e)}"
+        }
+
+@app.get("/api/indicators/standard")
+def list_standard_indicators():
+    """List all saved standard indicators"""
+    try:
+        indicators = []
+        
+        # Check if directory exists
+        if not STANDARD_INDICATORS_DIR.exists():
+            return indicators
+            
+        # Load all JSON files from the standard indicators directory
+        for file_path in STANDARD_INDICATORS_DIR.glob("*.json"):
+            try:
+                with open(file_path, "r") as f:
+                    indicator = json.loads(f.read())
+                    indicators.append(indicator)
+            except Exception as e:
+                logger.error(f"Error loading standard indicator from {file_path}: {str(e)}")
+                
+        return indicators
+    except Exception as e:
+        logger.error(f"Error listing standard indicators: {str(e)}")
+        return []
+
+# Helper function to generate sample standard indicators catalog
+def generate_sample_standard_indicators_catalog():
+    """Generate a sample catalog if pandas-ta is not available"""
+    return [
+        {
+            "id": "trend",
+            "name": "Trend Indicators",
+            "description": "Indicators that help identify market direction and strength",
+            "indicators": [
+                {
+                    "id": "sma",
+                    "name": "Simple Moving Average (SMA)",
+                    "category": "trend",
+                    "description": "Simple moving average over a specified period",
+                    "parameters": [
+                        {"name": "length", "type": "int", "default": 20, "min": 2, "max": 500, 
+                         "description": "Period length"},
+                        {"name": "source", "type": "string", "default": "close", 
+                         "options": ["open", "high", "low", "close", "volume"], 
+                         "description": "Input data source"}
+                    ],
+                    "inputs": ["close"],
+                    "outputs": ["sma"],
+                    "source_library": "pandas_ta"
+                }
+            ]
+        }
+    ]
+
+def generate_sample_data(num_rows=300):
+    """Generate sample OHLCV data for testing indicators"""
+    import pandas as pd
+    import numpy as np
+    from datetime import datetime, timedelta
+    
+    # Start with a base price
+    base_price = 100.0
+    
+    # Generate timestamps
+    end_date = datetime.now()
+    dates = [end_date - timedelta(days=i) for i in range(num_rows)]
+    dates.reverse()
+    
+    # Generate price data with some randomness but realistic behavior
+    # Start with random walk
+    np.random.seed(42)  # For reproducibility
+    
+    # Simple price generation based on random walk
+    changes = np.random.normal(0, 1, num_rows) * 0.5
+    # Add some trend
+    trend = np.linspace(0, 3, num_rows) * 0.3
+    changes = changes + trend
+    
+    # Calculate close prices
+    close_prices = base_price + np.cumsum(changes)
+    
+    # Generate other OHLC values based on close with some randomness
+    highs = close_prices + np.random.random(num_rows) * 2
+    lows = close_prices - np.random.random(num_rows) * 2
+    
+    # Make sure highs are always higher than lows
+    for i in range(num_rows):
+        if highs[i] <= lows[i]:
+            highs[i] = lows[i] + 0.01
+    
+    # Generate open prices between high and low
+    opens = lows + np.random.random(num_rows) * (highs - lows)
+    
+    # Generate volumes (higher on bigger price moves)
+    volumes = (np.abs(changes) * 10000 + 5000) * np.random.random(num_rows) * 5
+    
+    # Create DataFrame
+    df = pd.DataFrame({
+        'timestamp': dates,
+        'open': opens,
+        'high': highs,
+        'low': lows,
+        'close': close_prices,
+        'volume': volumes
+    })
+    
+    # Add some gaps and volatility to make it more realistic
+    # Add a sudden drop
+    drop_idx = num_rows // 3
+    drop_pct = 0.05
+    df.loc[drop_idx:, ['open', 'high', 'low', 'close']] *= (1 - drop_pct)
+    
+    # Add a rally
+    rally_idx = num_rows * 2 // 3
+    rally_pct = 0.08
+    df.loc[rally_idx:, ['open', 'high', 'low', 'close']] *= (1 + rally_pct)
+    
+    # Ensure all values are positive and correctly ordered
+    df['low'] = df[['open', 'close']].min(axis=1) * 0.99
+    df['high'] = df[['open', 'close']].max(axis=1) * 1.01
+    
+    return df
+
+# Helper function to generate sample standard indicator test results
+def generate_sample_standard_indicator_test(indicator_id):
+    """Generate sample test results for a standard indicator"""
+    # Generate some sample series data (50 points)
+    series_data = [round(50 + 5 * (i % 10) + i/10, 2) for i in range(50)]
+    dates = [(datetime.now() - timedelta(days=50-i)).strftime("%Y-%m-%d") for i in range(50)]
+    
+    # Return last 10 values for the preview
+    preview_data = series_data[-10:]
+    preview_dates = dates[-10:]
+    
+    # Create different output based on indicator type
+    if indicator_id == "rsi":
+        # RSI oscillates between 0-100
+        rsi_data = [min(max(30 + 40 * ((i % 10) / 10), 30), 70) for i in range(50)]
+        preview = {"rsi": rsi_data[-10:]}
+    elif indicator_id == "macd":
+        # MACD has multiple output series
+        macd_data = [round((i % 10) - 5, 2) for i in range(50)]
+        signal_data = [round((i % 8) - 4, 2) for i in range(50)]
+        hist_data = [round(macd_data[i] - signal_data[i], 2) for i in range(50)]
+        preview = {
+            "macd": macd_data[-10:],
+            "macd_signal": signal_data[-10:],
+            "macd_histogram": hist_data[-10:]
+        }
+    elif indicator_id == "bbands":
+        # Bollinger Bands have upper, middle, and lower bands
+        middle = series_data
+        upper = [round(val + 10 + (i % 5), 2) for i, val in enumerate(middle)]
+        lower = [round(val - 10 - (i % 5), 2) for i, val in enumerate(middle)]
+        preview = {
+            "bbands_lower": lower[-10:],
+            "bbands_middle": middle[-10:],
+            "bbands_upper": upper[-10:]
+        }
+    else:
+        # Default to a single series for other indicators
+        preview = {f"{indicator_id}": preview_data}
+    
+    # Include price data in the response
+    price_data = {
+        "open": [round(val - 1, 2) for val in series_data[-10:]],
+        "high": [round(val + 2, 2) for val in series_data[-10:]],
+        "low": [round(val - 2, 2) for val in series_data[-10:]],
+        "close": series_data[-10:],
+        "volume": [int(10000 + 5000 * (i % 5)) for i in range(10)]
+    }
+    
+    return {
+        "success": True,
+        "message": "Indicator calculated successfully",
+        "preview": preview,
+        "dates": preview_dates,
+        "price_data": price_data
+    }
 
 if __name__ == "__main__":
     # Load custom indicators before starting the server

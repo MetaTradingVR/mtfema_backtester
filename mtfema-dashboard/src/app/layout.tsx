@@ -3,7 +3,7 @@ import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { ThemeProvider } from "@/components/ui/theme-provider";
 import { SiteHeader } from "@/components/site-header";
-import { BasicServerStatus } from "@/components/basic-server-status";
+import { SimpleServerIndicator } from "@/components/simple-server-indicator";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -38,9 +38,7 @@ export default function RootLayout({
         >
           <div className="relative flex min-h-screen flex-col">
             <SiteHeader />
-            <div className="fixed top-4 right-16 z-50">
-              <BasicServerStatus />
-            </div>
+            {/* Server indicator moved to individual page components for better alignment */}
             <main className="flex-1">{children}</main>
           </div>
         </ThemeProvider>

@@ -10,6 +10,7 @@ import { useState, useEffect, useCallback } from 'react';
 
 // API Endpoints
 const API_BASE_URL = 'http://localhost:5000/api';
+// Make sure we're using the exact URL format that the launcher expects
 const LAUNCHER_URL = 'http://localhost:5001';
 
 // Status colors
@@ -28,54 +29,91 @@ export function BasicServerStatus() {
   // Check server status
   const checkStatus = useCallback(async () => {
     try {
+      console.log('Checking server status at:', `${API_BASE_URL}/status`);
+      
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 2000);
       
-      const response = await fetch(`${API_BASE_URL}/status`, {
+      // Some browsers may cache the API responses, so add a cache-busting parameter
+      const cacheBuster = `?_=${Date.now()}`;
+      const response = await fetch(`${API_BASE_URL}/status${cacheBuster}`, {
         method: 'GET',
+        headers: {
+          'Cache-Control': 'no-cache, no-store, must-revalidate',
+          'Pragma': 'no-cache',
+          'Expires': '0',
+        },
         signal: controller.signal
       });
       
       clearTimeout(timeoutId);
       
       if (response.ok) {
+        console.log('Server responded with OK status');
         setStatus('online');
         console.log('Server is online');
       } else {
+        console.log('Server responded with error status:', response.status, response.statusText);
         setStatus('offline');
         checkLauncher();
         console.log('Server is offline');
       }
     } catch (error) {
+      console.error('Failed to check server:', error);
       setStatus('offline');
       checkLauncher();
-      console.log('Failed to check server:', error);
     }
   }, []);
   
   // Check if launcher is available
   const checkLauncher = useCallback(async () => {
     try {
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 2000);
+      console.log('Checking launcher availability at:', `${LAUNCHER_URL}/launcher/status`);
       
-      const response = await fetch(`${LAUNCHER_URL}/launcher/status`, {
-        method: 'GET',
-        signal: controller.signal
+      // For testing, use XMLHttpRequest which has different CORS handling than fetch
+      // This provides a more robust way to detect if the server is actually there
+      return new Promise<void>((resolve) => {
+        const xhr = new XMLHttpRequest();
+        xhr.open('GET', `${LAUNCHER_URL}/launcher/status`, true);
+        xhr.setRequestHeader('Content-Type', 'application/json');
+        xhr.setRequestHeader('Accept', 'application/json');
+        xhr.timeout = 2000; // 2 second timeout
+        
+        xhr.onload = function() {
+          if (xhr.status >= 200 && xhr.status < 300) {
+            try {
+              const data = JSON.parse(xhr.responseText);
+              console.log('Launcher status data:', data);
+              setCanStart(true);
+              console.log('Launcher is available');
+            } catch (e) {
+              console.error('Error parsing launcher response:', e);
+              setCanStart(false);
+            }
+          } else {
+            console.log('Launcher status error:', xhr.status, xhr.statusText);
+            setCanStart(false);
+          }
+          resolve();
+        };
+        
+        xhr.onerror = function() {
+          console.error('Network error checking launcher');
+          setCanStart(false);
+          resolve();
+        };
+        
+        xhr.ontimeout = function() {
+          console.error('Timeout checking launcher');
+          setCanStart(false);
+          resolve();
+        };
+        
+        xhr.send();
       });
-      
-      clearTimeout(timeoutId);
-      
-      if (response.ok) {
-        setCanStart(true);
-        console.log('Launcher is available');
-      } else {
-        setCanStart(false);
-        console.log('Launcher is not available');
-      }
     } catch (error) {
+      console.error('Failed to check launcher:', error);
       setCanStart(false);
-      console.log('Failed to check launcher:', error);
     }
   }, []);
   
@@ -87,58 +125,62 @@ export function BasicServerStatus() {
     setStatus('starting');
     
     try {
-      // Create a controller to handle timeout
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
+      console.log('Sending server start request to:', `${LAUNCHER_URL}/launcher/start`);
       
-      const response = await fetch(`${LAUNCHER_URL}/launcher/start`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        signal: controller.signal
+      // Use XMLHttpRequest for better cross-origin support
+      await new Promise<void>((resolve) => {
+        const xhr = new XMLHttpRequest();
+        xhr.open('POST', `${LAUNCHER_URL}/launcher/start`, true);
+        xhr.setRequestHeader('Content-Type', 'application/json');
+        xhr.setRequestHeader('Accept', 'application/json');
+        xhr.timeout = 10000; // 10 second timeout
+        
+        xhr.onload = function() {
+          if (xhr.status >= 200 && xhr.status < 300) {
+            console.log('Server start requested successfully');
+            resolve();
+          } else {
+            console.log('Failed to start server:', xhr.status, xhr.statusText);
+            setStatus('offline');
+            resolve();
+          }
+        };
+        
+        xhr.onerror = function() {
+          console.error('Network error starting server');
+          setStatus('offline');
+          resolve();
+        };
+        
+        xhr.ontimeout = function() {
+          console.error('Timeout starting server');
+          setStatus('offline');
+          resolve();
+        };
+        
+        xhr.send(JSON.stringify({})); // Send empty object as body
       });
       
-      clearTimeout(timeoutId);
+      // Poll for server to come online
+      let attempts = 0;
+      const maxAttempts = 30;
       
-      if (response.ok) {
-        console.log('Server start requested successfully');
+      const poll = setInterval(() => {
+        console.log(`Polling for server (attempt ${attempts + 1}/${maxAttempts})...`);
         
-        // Poll for server to come online
-        let attempts = 0;
-        const maxAttempts = 30;
+        // Use XMLHttpRequest for status checking too
+        const statusXhr = new XMLHttpRequest();
+        const cacheBuster = `?_=${Date.now()}`;
+        statusXhr.open('GET', `${API_BASE_URL}/status${cacheBuster}`, true);
+        statusXhr.setRequestHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+        statusXhr.timeout = 2000; // 2 second timeout
         
-        const poll = setInterval(async () => {
-          console.log(`Polling for server (attempt ${attempts + 1}/${maxAttempts})...`);
-          
-          try {
-            const statusController = new AbortController();
-            const statusTimeoutId = setTimeout(() => statusController.abort(), 2000);
-            
-            const statusResponse = await fetch(`${API_BASE_URL}/status`, {
-              method: 'GET',
-              headers: {
-                'Content-Type': 'application/json',
-              },
-              signal: statusController.signal
-            });
-            
-            clearTimeout(statusTimeoutId);
-            
-            if (statusResponse.ok) {
-              console.log('Server is now online');
-              setStatus('online');
-              clearInterval(poll);
-            } else {
-              attempts++;
-              if (attempts >= maxAttempts) {
-                console.log('Failed to start server after maximum attempts');
-                setStatus('offline');
-                clearInterval(poll);
-              }
-            }
-          } catch (error) {
-            console.log(`Poll attempt ${attempts + 1} failed:`, error);
+        statusXhr.onload = function() {
+          if (statusXhr.status >= 200 && statusXhr.status < 300) {
+            console.log('Server is now online');
+            setStatus('online');
+            clearInterval(poll);
+          } else {
             attempts++;
             if (attempts >= maxAttempts) {
               console.log('Failed to start server after maximum attempts');
@@ -146,14 +188,33 @@ export function BasicServerStatus() {
               clearInterval(poll);
             }
           }
-        }, 1000);
-      } else {
-        const errorData = await response.json().catch(() => ({}));
-        console.log('Failed to start server:', errorData);
-        setStatus('offline');
-      }
+        };
+        
+        statusXhr.onerror = function() {
+          console.log(`Poll attempt ${attempts + 1} failed: Network error`);
+          attempts++;
+          if (attempts >= maxAttempts) {
+            console.log('Failed to start server after maximum attempts');
+            setStatus('offline');
+            clearInterval(poll);
+          }
+        };
+        
+        statusXhr.ontimeout = function() {
+          console.log(`Poll attempt ${attempts + 1} failed: Timeout`);
+          attempts++;
+          if (attempts >= maxAttempts) {
+            console.log('Failed to start server after maximum attempts');
+            setStatus('offline');
+            clearInterval(poll);
+          }
+        };
+        
+        statusXhr.send();
+      }, 1000);
+      
     } catch (error) {
-      console.log('Error starting server:', error);
+      console.error('Error starting server:', error);
       setStatus('offline');
     }
   }, [status]);
