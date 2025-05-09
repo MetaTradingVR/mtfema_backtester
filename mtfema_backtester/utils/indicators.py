@@ -12,6 +12,10 @@ import logging
 from abc import ABC, abstractmethod
 import inspect
 
+# Will be imported after class definitions to avoid circular imports
+ZigZag = None
+FibRetracement = None
+
 logger = logging.getLogger(__name__)
 
 class Indicator(ABC):
@@ -403,6 +407,8 @@ class IndicatorRegistry:
         self.register("EMA", EMA)
         self.register("BollingerBands", BollingerBands)
         self.register("PaperFeet", PaperFeet)
+        self.register("ZigZag", ZigZag)
+        self.register("FibRetracement", FibRetracement)
         
         logger.info("Indicator registry initialized")
     
@@ -504,3 +510,7 @@ def apply_indicator(data: pd.DataFrame, name: str, **params) -> pd.DataFrame:
     """
     indicator = create_indicator(name, **params)
     return indicator.apply_to_dataframe(data)
+
+
+# Import indicator implementations to avoid circular imports
+from mtfema_backtester.utils.zigzag import ZigZag, FibRetracement

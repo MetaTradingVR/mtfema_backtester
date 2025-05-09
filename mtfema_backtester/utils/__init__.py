@@ -15,26 +15,18 @@ from .timeframe_utils import (
     TIMEFRAME_HIERARCHY,
     TIMEFRAME_TO_MINUTES
 )
-"""
-Utility modules for the MT 9 EMA Extension Strategy Backtester.
 
-This package contains various utility modules for timeframe handling,
-performance monitoring, and strategy logging.
-"""
+# Import other utility modules if they exist
+try:
+    from .performance_monitor import get_performance_monitor, time_operation, TimingContext
+except ImportError:
+    pass
 
-from .timeframe_utils import normalize_timeframe, get_timeframe_minutes, resample_to_timeframe
-from .performance_monitor import get_performance_monitor, time_operation, TimingContext
-from .strategy_logger import get_strategy_logger
+try:
+    from .strategy_logger import get_strategy_logger
+except ImportError:
+    pass
 
-__all__ = [
-    'normalize_timeframe',
-    'get_timeframe_minutes',
-    'resample_to_timeframe',
-    'get_performance_monitor',
-    'time_operation',
-    'TimingContext',
-    'get_strategy_logger'
-]
 __all__ = [
     'normalize_timeframe',
     'get_timeframe_minutes',
@@ -46,3 +38,18 @@ __all__ = [
     'TIMEFRAME_HIERARCHY',
     'TIMEFRAME_TO_MINUTES'
 ]
+
+# Add other utility functions to __all__ if they were successfully imported
+try:
+    __all__.extend([
+        'get_performance_monitor',
+        'time_operation',
+        'TimingContext'
+    ])
+except NameError:
+    pass
+
+try:
+    __all__.append('get_strategy_logger')
+except NameError:
+    pass

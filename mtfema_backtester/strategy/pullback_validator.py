@@ -96,6 +96,14 @@ class PullbackValidator:
         # Get EMA at reclamation
         reclamation_ema = ema_series.iloc[reclamation_index]
         
+        # Get Fibonacci levels from configuration
+        if len(self.fibonacci_zone) == 2:
+            fib_min, fib_max = self.fibonacci_zone
+        else:
+            # Fallback to default values
+            fib_min, fib_max = 0.382, 0.618
+            logger.warning(f"Invalid fibonacci_zone format: {self.fibonacci_zone}. Using defaults: {fib_min}, {fib_max}")
+        
         # Find swing points
         if is_long:
             # For long trades after bullish reclamation
@@ -105,13 +113,18 @@ class PullbackValidator:
             
             # Calculate Fibonacci retracement levels (bullish case)
             range_size = reclamation_ema - swing_low
-            fib_500 = reclamation_ema - (range_size * 0.500)
-            fib_618 = reclamation_ema - (range_size * 0.618)
+            # Use config values instead of hardcoded values
+            fib_min_level = reclamation_ema - (range_size * fib_min)
+            fib_max_level = reclamation_ema - (range_size * fib_max)
             
             # Check for pullback to Fibonacci zone
             current_low = data.iloc[reclamation_index+1]['Low']
             
-            is_in_fib_zone = (current_low <= fib_500 and current_low >= fib_618)
+            # Ensure correct order (min_price should be larger in bullish case)
+            if fib_min_level < fib_max_level:
+                fib_min_level, fib_max_level = fib_max_level, fib_min_level
+            
+            is_in_fib_zone = (current_low <= fib_min_level and current_low >= fib_max_level)
             higher_low = current_low > swing_low
             bullish_candle = data.iloc[reclamation_index+1]['Close'] > data.iloc[reclamation_index+1]['Open']
             
@@ -122,8 +135,8 @@ class PullbackValidator:
                 'bullish_candle': bullish_candle,
                 'fib_levels': {
                     '0.000': swing_low,
-                    '0.500': fib_500,
-                    '0.618': fib_618,
+                    str(fib_min): fib_min_level,
+                    str(fib_max): fib_max_level,
                     '1.000': reclamation_ema
                 },
                 'current_low': current_low,
@@ -139,13 +152,18 @@ class PullbackValidator:
             
             # Calculate Fibonacci retracement levels (bearish case)
             range_size = swing_high - reclamation_ema
-            fib_500 = reclamation_ema + (range_size * 0.500)
-            fib_618 = reclamation_ema + (range_size * 0.618)
+            # Use config values instead of hardcoded values
+            fib_min_level = reclamation_ema + (range_size * fib_min)
+            fib_max_level = reclamation_ema + (range_size * fib_max)
             
             # Check for pullback to Fibonacci zone
             current_high = data.iloc[reclamation_index+1]['High']
             
-            is_in_fib_zone = (current_high >= fib_500 and current_high <= fib_618)
+            # Ensure correct order (min_price should be smaller in bearish case)
+            if fib_min_level > fib_max_level:
+                fib_min_level, fib_max_level = fib_max_level, fib_min_level
+            
+            is_in_fib_zone = (current_high >= fib_min_level and current_high <= fib_max_level)
             lower_high = current_high < swing_high
             bearish_candle = data.iloc[reclamation_index+1]['Close'] < data.iloc[reclamation_index+1]['Open']
             
@@ -156,8 +174,8 @@ class PullbackValidator:
                 'bearish_candle': bearish_candle,
                 'fib_levels': {
                     '0.000': reclamation_ema,
-                    '0.500': fib_500,
-                    '0.618': fib_618,
+                    str(fib_min): fib_min_level,
+                    str(fib_max): fib_max_level,
                     '1.000': swing_high
                 },
                 'current_high': current_high,

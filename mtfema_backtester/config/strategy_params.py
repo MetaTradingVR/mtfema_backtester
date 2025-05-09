@@ -36,8 +36,8 @@ DEFAULT_PARAMS = {
         "squeeze_threshold": 0.1
     },
     "fibonacci": {
-        "pullback_min": 0.382,  # Minimum Fibonacci pullback level (38.2%)
-        "pullback_max": 0.618,  # Maximum Fibonacci pullback level (61.8%)
+        "levels": [0, 0.236, 0.382, 0.5, 0.618, 0.786, 1.0, 1.618, 2.618],  # Standard Fibonacci levels
+        "pullback_zone": [0.382, 0.618],  # Min and max Fibonacci pullback levels
         "extension_levels": [1.618, 2.618, 3.618, 4.236]  # Fibonacci extension levels
     },
     "risk_management": {

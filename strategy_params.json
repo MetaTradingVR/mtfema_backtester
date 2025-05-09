@@ -1,0 +1,75 @@
+{
+    "ema": {
+        "period": 9,
+        "reclamation_confirmation_bars": 2,
+        "extension_thresholds": {
+            "1m": 0.2,
+            "5m": 0.4,
+            "10m": 0.5,
+            "15m": 0.6,
+            "30m": 0.8,
+            "1h": 1.0,
+            "2h": 1.2,
+            "4h": 1.5,
+            "1d": 2.0,
+            "1w": 3.0,
+            "1M": 4.0
+        }
+    },
+    "bollinger": {
+        "period": 20,
+        "std_dev": 2.0,
+        "squeeze_threshold": 0.1
+    },
+    "fibonacci": {
+        "levels": [0, 0.236, 0.382, 0.5, 0.618, 0.786, 1.0, 1.618, 2.618],
+        "pullback_zone": [0.382, 0.618],
+        "extension_levels": [
+            1.618,
+            2.618,
+            3.618,
+            4.236
+        ]
+    },
+    "risk_management": {
+        "account_risk_percent": 1.0,
+        "reward_risk_ratio": 2.0,
+        "max_trades_per_day": 3,
+        "max_correlated_exposure": 2,
+        "stop_buffer_atr_multiple": 0.5
+    },
+    "timeframes": {
+        "use_timeframes": [
+            "1d",
+            "4h",
+            "1h",
+            "15m",
+            "5m"
+        ],
+        "reference_timeframe": "4h",
+        "entry_timeframe": "15m",
+        "confirmation_timeframe": "5m"
+    },
+    "filters": {
+        "min_adx": 20,
+        "min_volume": 100000,
+        "max_spread_percent": 0.1,
+        "rsi_oversold": 30,
+        "rsi_overbought": 70
+    },
+    "session": {
+        "trading_hours": {
+            "start": "08:30",
+            "end": "16:00"
+        },
+        "avoid_news": true,
+        "avoid_fomc": true
+    },
+    "symbols": {
+        "default_symbol": "NQ",
+        "base_commission": 0.0,
+        "commission_per_contract": 2.5,
+        "base_slippage_ticks": 1,
+        "contract_multiplier": 20
+    }
+}

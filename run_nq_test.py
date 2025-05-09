@@ -13,6 +13,7 @@ import pandas as pd
 import numpy as np
 import logging
 import json
+import copy
 
 # Import project modules
 from mtfema_backtester.data.timeframe_data import TimeframeData
@@ -58,6 +59,19 @@ def parse_args():
                        help="Generate parameter file template (specify output path)")
     parser.add_argument("--mode", type=str, choices=["test", "backtest", "optimize"], 
                        default="test", help="Test mode (default: test)")
+    parser.add_argument("--optimize-iterations", type=int, default=None,
+                       help="Number of iterations for randomized search in optimize mode")
+    
+    # Optimization parameters
+    parser.add_argument("--optimizer", type=str, choices=["grid", "random", "bayesian"], 
+                       default="grid", help="Optimization method (default: grid)")
+    parser.add_argument("--opt-surrogate", type=str, choices=["GP", "RF", "GBRT"], 
+                       default="GP", help="Surrogate model for Bayesian optimization")
+    parser.add_argument("--opt-acq-func", type=str, 
+                       choices=["EI", "PI", "LCB", "gp_hedge"], 
+                       default="EI", help="Acquisition function for Bayesian optimization")
+    parser.add_argument("--opt-initial-points", type=int, default=10,
+                       help="Number of initial points for Bayesian optimization")
     
     return parser.parse_args()
 
@@ -319,17 +333,349 @@ def run_test_mode(args, strategy_params):
 def run_backtest_mode(args, strategy_params):
     """Run in backtest mode - evaluate strategy performance"""
     logger.info("Starting backtest mode")
-    # TODO: Implement backtest mode with signal generation and performance metrics
-    # This is a placeholder for future implementation
-    logger.warning("Backtest mode not fully implemented yet")
+    
+    # Notice about preferred script
+    logger.info("Note: For full backtesting capabilities, consider using run_backtest.py")
+    
+    # Create output directory
+    os.makedirs(args.output_dir, exist_ok=True)
+    
+    # Set date range
+    if args.start_date:
+        start_date = datetime.strptime(args.start_date, "%Y-%m-%d")
+    else:
+        start_date = datetime.now() - timedelta(days=365)
+        
+    if args.end_date:
+        end_date = datetime.strptime(args.end_date, "%Y-%m-%d")
+    else:
+        end_date = datetime.now()
+    
+    # Parse and normalize timeframes
+    raw_timeframes = [tf.strip() for tf in args.timeframes.split(',')]
+    timeframes = [normalize_timeframe(tf) for tf in raw_timeframes]
+    
+    # Initialize data loader and TimeframeData
+    data_loader = DataLoader(cache_dir=os.path.join(args.output_dir, "cache"))
+    tf_data = TimeframeData()
+    
+    # Load data and calculate indicators (reusing code from run_test_mode)
+    for tf in timeframes:
+        logger.info(f"Loading {args.symbol} data for {tf} timeframe")
+        data = data_loader.get_data(
+            args.symbol, tf, start_date, end_date, use_cache=True
+        )
+        if data is not None and not data.empty:
+            tf_data.set_data(tf, data)
+            logger.info(f"Loaded {len(data)} rows for {tf} timeframe")
+        else:
+            logger.warning(f"Failed to load data for {tf} timeframe")
+    
+    if not tf_data.get_available_timeframes():
+        logger.error("No data loaded. Exiting.")
+        return False
+    
+    # Process data with indicators (reusing logic from run_test_mode)
+    ema_period = args.ema_period if args.ema_period is not None else strategy_params.get_param('ema.period')
+    
+    for tf in tf_data.get_available_timeframes():
+        data = tf_data.get_timeframe(tf)
+        threshold = strategy_params.get_extension_threshold(tf)
+        
+        # Calculate indicators
+        ema, extension, signals = detect_9ema_extension(
+            data, ema_period=ema_period, threshold=threshold
+        )
+        
+        tf_data.add_indicator(tf, f"EMA_{ema_period}", ema)
+        tf_data.add_indicator(tf, "Extension", extension)
+        tf_data.add_indicator(tf, "ExtensionSignal", signals)
+        
+        # Calculate Bollinger Bands
+        bb_period = strategy_params.get_param('bollinger.period')
+        bb_std_dev = strategy_params.get_param('bollinger.std_dev')
+        
+        middle_band, upper_band, lower_band = calculate_bollinger_bands(
+            data, period=bb_period, std_dev=bb_std_dev
+        )
+        
+        if not (middle_band.empty or upper_band.empty or lower_band.empty):
+            # Process bands to ensure proper dimensionality
+            # Ensure the data is 1-dimensional
+            if hasattr(middle_band, 'values'):
+                middle_band_values = middle_band.values
+                if len(middle_band_values.shape) > 1:
+                    middle_band_values = middle_band_values.flatten()
+            else:
+                middle_band_values = middle_band
+            
+            if hasattr(upper_band, 'values'):
+                upper_band_values = upper_band.values
+                if len(upper_band_values.shape) > 1:
+                    upper_band_values = upper_band_values.flatten()
+            else:
+                upper_band_values = upper_band
+            
+            if hasattr(lower_band, 'values'):
+                lower_band_values = lower_band.values
+                if len(lower_band_values.shape) > 1:
+                    lower_band_values = lower_band_values.flatten()
+            else:
+                lower_band_values = lower_band
+            
+            # Create a DataFrame with all bands
+            bb = pd.DataFrame({
+                'Middle': middle_band_values,
+                'Upper': upper_band_values,
+                'Lower': lower_band_values
+            }, index=data.index)
+            
+            tf_data.add_indicator(tf, "BollingerBands", bb)
+            bb_signals = detect_bollinger_breakouts(data, upper_band, lower_band)
+            tf_data.add_indicator(tf, "BollingerBreakout", bb_signals)
+        
+        # Detect EMA reclamations
+        confirmation_bars = strategy_params.get_param('ema.reclamation_confirmation_bars')
+        reclamation_detector = ReclamationDetector(ema_period=ema_period, confirmation_bars=confirmation_bars)
+        reclamation_data = reclamation_detector.detect_reclamation(data, ema)
+        if not reclamation_data.empty:
+            tf_data.add_indicator(tf, "Reclamation", reclamation_data)
+    
+    # Import required functions for backtest execution
+    try:
+        from mtfema_backtester.strategy.signal_generator import generate_signals
+        from mtfema_backtester.backtest.backtest_engine import execute_backtest
+        from mtfema_backtester.backtest.performance_metrics import calculate_performance_metrics
+    except ImportError as e:
+        logger.error(f"Error importing backtesting modules: {str(e)}")
+        logger.error("Please ensure all required modules are installed")
+        return False
+    
+    # Generate signals
+    logger.info("Generating trading signals")
+    signals = generate_signals(tf_data, strategy_params)
+    
+    if signals.empty:
+        logger.warning("No signals generated")
+        return False
+    
+    # Save signals
+    signals_file = os.path.join(args.output_dir, f"{args.symbol}_signals.csv")
+    signals.to_csv(signals_file)
+    logger.info(f"Saved {len(signals)} signals to {signals_file}")
+    
+    # Execute backtest
+    logger.info("Executing backtest")
+    trades_df, final_balance, equity_curve = execute_backtest(signals, tf_data, strategy_params)
+    
+    if trades_df.empty:
+        logger.warning("No trades executed")
+        return False
+    
+    # Save trades
+    trades_file = os.path.join(args.output_dir, f"{args.symbol}_trades.csv")
+    trades_df.to_csv(trades_file)
+    logger.info(f"Saved {len(trades_df)} trades to {trades_file}")
+    
+    # Calculate performance metrics
+    logger.info("Calculating performance metrics")
+    initial_balance = strategy_params.get_param('risk_management.initial_balance', 10000.0)
+    metrics, equity_curve = calculate_performance_metrics(trades_df, initial_balance)
+    
+    # Save metrics
+    metrics_file = os.path.join(args.output_dir, f"{args.symbol}_metrics.json")
+    serializable_metrics = {k: str(v) if not isinstance(v, (int, float, dict)) else v for k, v in metrics.items()}
+    with open(metrics_file, 'w') as f:
+        json.dump(serializable_metrics, f, indent=2)
+    logger.info(f"Saved performance metrics to {metrics_file}")
+    
+    # Save equity curve
+    equity_file = os.path.join(args.output_dir, f"{args.symbol}_equity_curve.csv")
+    equity_curve.to_csv(equity_file)
+    logger.info(f"Saved equity curve to {equity_file}")
+    
+    # Print summary
+    logger.info(f"Backtest completed for {args.symbol}")
+    logger.info(f"Initial balance: ${initial_balance:.2f}")
+    logger.info(f"Final balance: ${final_balance:.2f}")
+    logger.info(f"Total profit: ${final_balance - initial_balance:.2f} ({(final_balance/initial_balance - 1)*100:.2f}%)")
+    logger.info(f"Total trades: {len(trades_df)}")
+    if len(trades_df) > 0:
+        win_rate = (trades_df['profit'] > 0).mean() * 100
+        logger.info(f"Win rate: {win_rate:.2f}%")
+    
+    logger.info("For advanced visualizations and more detailed analysis, use run_backtest.py")
     return True
 
 def run_optimize_mode(args, strategy_params):
-    """Run in optimize mode - test multiple parameter combinations"""
+    """Run in optimize mode - test multiple parameter combinations
+    
+    This mode tests various strategy parameter combinations to find the optimal settings.
+    """
     logger.info("Starting optimization mode")
-    # TODO: Implement parameter optimization
-    # This is a placeholder for future implementation
-    logger.warning("Optimize mode not fully implemented yet")
+    
+    # Create output directory
+    output_dir = args.output_dir
+    os.makedirs(output_dir, exist_ok=True)
+    
+    # Load price data
+    data = load_data(args.symbol, args.timeframe, args.start_date, args.end_date)
+    if data is None or data.empty:
+        logger.error("Failed to load data for optimization")
+        return False
+    
+    # Process data and calculate indicators
+    processed_data = process_data(data, strategy_params)
+    
+    # Define the parameter grid for optimization
+    param_grid = {
+        # EMA settings
+        "ema.period": [9, 13, 21],
+        
+        # Extension thresholds for different timeframes
+        "ema.extension_thresholds.1h": [0.8, 1.0, 1.2],
+        "ema.extension_thresholds.4h": [1.2, 1.5, 1.8],
+        "ema.extension_thresholds.1d": [1.5, 2.0, 2.5],
+        
+        # Fibonacci settings
+        "fibonacci.pullback_zone": [[0.382, 0.618], [0.5, 0.618], [0.382, 0.5]],
+        
+        # Risk management
+        "risk_management.reward_risk_ratio": [1.5, 2.0, 2.5, 3.0],
+    }
+    
+    # Define the backtest function for optimization
+    def run_backtest_with_params(params, data):
+        # Create a local copy of strategy parameters and update with test params
+        local_params = copy.deepcopy(strategy_params)
+        
+        # Apply optimization parameters
+        for param_path, value in params.items():
+            local_params.set_param(param_path, value)
+        
+        # Run backtest
+        try:
+            # Initialize strategy with parameters
+            signals = generate_signals(data, local_params)
+            
+            # If no signals were generated, return empty results
+            if signals.empty:
+                return {
+                    'total_return_pct': 0, 
+                    'sharpe_ratio': 0,
+                    'num_trades': 0,
+                    'win_rate': 0
+                }, pd.DataFrame(), pd.DataFrame()
+            
+            # Run backtest
+            trades, metrics, equity_curve = execute_backtest(signals, data, local_params)
+            
+            return metrics, trades, equity_curve
+            
+        except Exception as e:
+            logger.error(f"Error running backtest with params {params}: {str(e)}")
+            # Return empty results on error
+            return {
+                'total_return_pct': 0, 
+                'sharpe_ratio': 0,
+                'num_trades': 0,
+                'win_rate': 0
+            }, pd.DataFrame(), pd.DataFrame()
+    
+    # Select the optimizer based on command line arguments
+    optimization_dir = os.path.join(output_dir, "optimization")
+    
+    if args.optimizer == "bayesian":
+        try:
+            # Import the Bayesian optimizer
+            from mtfema_backtester.optimization.bayesian_optimizer import BayesianOptimizer, SKOPT_AVAILABLE
+            
+            if not SKOPT_AVAILABLE:
+                logger.warning("scikit-optimize not available. Falling back to randomized search.")
+                args.optimizer = "random"
+            else:
+                logger.info(f"Using Bayesian optimization with {args.opt_surrogate} surrogate model")
+                
+                # Create Bayesian optimizer
+                optimizer = BayesianOptimizer(
+                    backtest_func=run_backtest_with_params,
+                    param_grid=param_grid,
+                    data=processed_data,
+                    optimization_target='sharpe_ratio',
+                    secondary_target='total_return_pct',
+                    n_jobs=-1,
+                    output_dir=optimization_dir,
+                    surrogate_model=args.opt_surrogate,
+                    acq_func=args.opt_acq_func,
+                    n_initial_points=args.opt_initial_points
+                )
+                
+                # Determine number of calls
+                n_calls = args.optimize_iterations or 50
+                logger.info(f"Running Bayesian optimization with {n_calls} calls")
+                
+                # Run optimization
+                best_result = optimizer.run_bayesian_optimization(n_calls=n_calls, save_results=True)
+        except ImportError:
+            logger.warning("Bayesian optimizer not available. Falling back to standard optimizer.")
+            args.optimizer = "random"
+    
+    # Fall back to standard optimizer if not using Bayesian or if Bayesian failed
+    if args.optimizer != "bayesian":
+        # Import the standard optimizer
+        from mtfema_backtester.optimization.optimizer import Optimizer
+        
+        # Create optimizer
+        optimizer = Optimizer(
+            backtest_func=run_backtest_with_params,
+            param_grid=param_grid,
+            data=processed_data,
+            optimization_target='sharpe_ratio',
+            secondary_target='total_return_pct',
+            n_jobs=-1,
+            output_dir=optimization_dir
+        )
+        
+        # Determine number of combinations
+        total_combinations = optimizer.count_total_combinations()
+        logger.info(f"Testing {total_combinations:,} parameter combinations")
+        
+        # Check if we should use grid search or randomized search
+        if args.optimizer == "random" or (args.optimize_iterations and args.optimize_iterations > 0 and args.optimize_iterations < total_combinations):
+            iterations = args.optimize_iterations or min(50, total_combinations)
+            logger.info(f"Using randomized search with {iterations} iterations")
+            best_result = optimizer.run_randomized_search(n_iter=iterations, save_results=True)
+        else:
+            logger.info("Using grid search for all parameter combinations")
+            best_result = optimizer.run_grid_search(save_results=True)
+    
+    if best_result is None:
+        logger.error("Optimization failed to find any valid parameter combination")
+        return False
+    
+    # Display best results
+    logger.info("Best Parameter Combination:")
+    for param, value in best_result['params'].items():
+        logger.info(f"  {param}: {value}")
+    
+    logger.info("Performance Metrics:")
+    for metric, value in best_result['metrics'].items():
+        if isinstance(value, (int, float)):
+            logger.info(f"  {metric}: {value}")
+    
+    # Generate visualizations using the built-in visualization method
+    logger.info("Generating optimization visualizations...")
+    viz_dir = os.path.join(output_dir, "optimizations", "visualizations")
+    optimizer.visualize_results(output_dir=viz_dir)
+    logger.info(f"Visualizations saved to {viz_dir}")
+    
+    # Save best parameters to file
+    best_params_file = os.path.join(output_dir, "best_parameters.json")
+    with open(best_params_file, 'w') as f:
+        json.dump(best_result['params'], f, indent=4)
+    
+    logger.info(f"Best parameters saved to {best_params_file}")
+    
     return True
 
 def main():

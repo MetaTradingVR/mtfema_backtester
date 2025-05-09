@@ -83,8 +83,8 @@ export function ParameterHeatmap({ data, paramX, paramY, metric, title, classNam
       for (let i = 0; i < yValues.length; i++) {
         for (let j = 0; j < xValues.length; j++) {
           const value = zValues[i][j];
-          if (value !== null) {
-            const text = `${value.toFixed(2)}`;
+          if (value !== null && value !== undefined) {
+            const text = `${typeof value === 'number' ? value.toFixed(2) : value}`;
             annotations.push({
               x: xValues[j],
               y: yValues[i],

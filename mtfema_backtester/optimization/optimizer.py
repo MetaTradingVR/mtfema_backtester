@@ -271,167 +271,302 @@ class Optimizer:
         return sorted_results[0]
     
     def _save_results(self):
-        """Save optimization results to disk."""
+        """Save all results to disk."""
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         
-        # Save all results
-        all_results_path = self.output_dir / f"optimization_results_{timestamp}.json"
+        # Create results directory with timestamp
+        results_dir = self.output_dir / f"results_{timestamp}"
+        results_dir.mkdir(exist_ok=True, parents=True)
         
-        # Convert results to saveable format
-        saveable_results = []
+        # Save all results
+        all_results_file = results_dir / "all_results.json"
+        
+        # Prepare results for JSON serialization
+        serializable_results = []
         for result in self.results:
-            saveable_result = {
-                'params': result['params'],
-                'metrics': {k: v for k, v in result['metrics'].items() if isinstance(v, (int, float, str, bool))}
+            # Convert numpy values to Python native types
+            cleaned_result = {
+                'params': {k: self._make_serializable(v) for k, v in result['params'].items()},
+                'metrics': {k: self._make_serializable(v) for k, v in result['metrics'].items()}
             }
-            saveable_results.append(saveable_result)
-        
-        # Save all results
-        with open(all_results_path, 'w') as f:
-            json.dump(saveable_results, f, indent=2)
+            serializable_results.append(cleaned_result)
             
-        logger.info(f"Saved all optimization results to {all_results_path}")
-        
-        # Save best parameters
+        with open(all_results_file, 'w') as f:
+            json.dump(serializable_results, f, indent=4)
+            
+        # Save best result
         if self.best_result:
-            best_params_path = self.output_dir / f"best_params_{timestamp}.json"
-            
-            with open(best_params_path, 'w') as f:
-                json.dump(self.best_result['params'], f, indent=2)
-                
-            logger.info(f"Saved best parameters to {best_params_path}")
-            
-        # Create optimization summary
-        summary = {
-            'timestamp': timestamp,
-            'total_combinations_tested': len(self.results),
-            'optimization_target': self.optimization_target,
-            'secondary_target': self.secondary_target,
-            'best_params': self.best_result['params'] if self.best_result else None,
-            'best_metrics': self.best_result['metrics'] if self.best_result else None,
-            'param_grid': self.param_grid
-        }
+            best_result_file = results_dir / "best_result.json"
+            cleaned_best = {
+                'params': {k: self._make_serializable(v) for k, v in self.best_result['params'].items()},
+                'metrics': {k: self._make_serializable(v) for k, v in self.best_result['metrics'].items()}
+            }
+            with open(best_result_file, 'w') as f:
+                json.dump(cleaned_best, f, indent=4)
         
-        summary_path = self.output_dir / f"optimization_summary_{timestamp}.json"
-        
-        with open(summary_path, 'w') as f:
-            json.dump(summary, f, indent=2)
+        # Save parameter grid
+        param_grid_file = results_dir / "param_grid.json"
+        with open(param_grid_file, 'w') as f:
+            json.dump(self.param_grid, f, indent=4)
             
-        logger.info(f"Saved optimization summary to {summary_path}")
-    
+        logger.info(f"Results saved to {results_dir}")
+        
+        # Create visualizations if the visualization module is available
+        try:
+            from mtfema_backtester.optimization.visualization import visualize_optimization_results
+            
+            # Create visualization directory
+            viz_dir = results_dir / "visualizations"
+            viz_dir.mkdir(exist_ok=True, parents=True)
+            
+            # Generate visualizations
+            visualize_optimization_results(
+                results=self.results,
+                target_metric=self.optimization_target,
+                output_dir=str(viz_dir)
+            )
+            
+            logger.info(f"Optimization visualizations created in {viz_dir}")
+            
+        except ImportError:
+            logger.warning("Visualization module not available. Skipping visualization generation.")
+
+    def _make_serializable(self, value):
+        """Make a value JSON serializable."""
+        if isinstance(value, np.integer):
+            return int(value)
+        elif isinstance(value, np.floating):
+            return float(value)
+        elif isinstance(value, np.ndarray):
+            return value.tolist()
+        elif isinstance(value, list):
+            return [self._make_serializable(item) for item in value]
+        elif isinstance(value, dict):
+            return {k: self._make_serializable(v) for k, v in value.items()}
+        else:
+            return value
+            
     def create_heatmap(self, param1: str, param2: str, metric: str = None) -> Dict:
         """
-        Create a heatmap of two parameters versus a metric.
+        Create a heatmap of two parameters' effect on a metric.
         
         Args:
-            param1: First parameter to use for heatmap
-            param2: Second parameter to use for heatmap
-            metric: Metric to visualize (defaults to optimization_target)
+            param1: First parameter to vary
+            param2: Second parameter to vary
+            metric: Metric to measure (defaults to optimization_target)
             
         Returns:
-            Dictionary with heatmap data ready for plotting
+            Dictionary with heatmap data:
+            - x_values: List of values for param1
+            - y_values: List of values for param2
+            - z_values: 2D array of metric values
         """
-        if not self.results:
-            logger.warning("No results available for heatmap")
-            return None
-            
         if metric is None:
             metric = self.optimization_target
             
-        # Extract unique parameter values
-        param1_values = sorted(list(set([r['params'].get(param1) for r in self.results if param1 in r['params']])))
-        param2_values = sorted(list(set([r['params'].get(param2) for r in self.results if param2 in r['params']])))
+        metric_key = f"metrics.{metric}"
         
-        if not param1_values or not param2_values:
-            logger.warning(f"Parameters {param1} and/or {param2} not found in results")
-            return None
-            
-        # Create empty grid
-        grid = np.zeros((len(param1_values), len(param2_values)))
-        grid.fill(np.nan)
-        
-        # Fill grid with metric values
+        # Extract values for all three parameters
+        data = []
         for result in self.results:
-            if param1 in result['params'] and param2 in result['params'] and metric in result['metrics']:
-                p1_idx = param1_values.index(result['params'][param1])
-                p2_idx = param2_values.index(result['params'][param2])
-                grid[p1_idx, p2_idx] = result['metrics'][metric]
+            if metric not in result['metrics']:
+                logger.warning(f"Metric {metric} not found in result")
+                continue
+                
+            # Get parameter values
+            p1_value = self._get_nested_param(result['params'], param1)
+            p2_value = self._get_nested_param(result['params'], param2)
+            
+            if p1_value is None or p2_value is None:
+                logger.warning(f"Parameters {param1} or {param2} not found in result")
+                continue
+                
+            data.append({
+                'p1': p1_value,
+                'p2': p2_value,
+                'metric': result['metrics'][metric]
+            })
+            
+        if not data:
+            logger.warning("No valid data for heatmap")
+            return {}
+            
+        # Convert to DataFrame
+        df = pd.DataFrame(data)
+        
+        # Get unique values for each parameter
+        p1_values = sorted(df['p1'].unique())
+        p2_values = sorted(df['p2'].unique())
+        
+        # Handle case where values are not numeric
+        if not p1_values or not p2_values:
+            logger.warning("Not enough unique values for parameters")
+            return {}
+            
+        # Create 2D grid for heatmap
+        z_values = np.zeros((len(p2_values), len(p1_values)))
+        z_values.fill(np.nan)
+        
+        # Fill in grid with average metric values
+        for i, p2_val in enumerate(p2_values):
+            for j, p1_val in enumerate(p1_values):
+                mask = (df['p1'] == p1_val) & (df['p2'] == p2_val)
+                if mask.any():
+                    z_values[i, j] = df.loc[mask, 'metric'].mean()
         
         return {
-            'z': grid.tolist(),
-            'x': param2_values,
-            'y': param1_values,
-            'metric': metric
+            'x_values': p1_values,
+            'y_values': p2_values,
+            'z_values': z_values
         }
-    
+        
+    def _get_nested_param(self, params, param_path):
+        """Get a parameter value from a nested path."""
+        if param_path in params:
+            return params[param_path]
+            
+        # Try splitting the path
+        parts = param_path.split('.')
+        if len(parts) == 1:
+            return None
+            
+        # Navigate down the path
+        value = params
+        for part in parts:
+            if isinstance(value, dict) and part in value:
+                value = value[part]
+            else:
+                return None
+                
+        return value
+        
     def get_top_n_results(self, n: int = 10) -> List[Dict[str, Any]]:
         """
-        Get the top N parameter sets by the optimization target.
+        Get the top N results.
         
         Args:
             n: Number of top results to return
             
         Returns:
-            List of top N results
+            List of result dictionaries with params and metrics
         """
         if not self.results:
             return []
             
-        # Filter results that have the optimization target
-        valid_results = [r for r in self.results if self.optimization_target in r['metrics']]
-        
-        # Sort by optimization target (assume higher is better)
+        # Sort by optimization target (descending)
         sorted_results = sorted(
-            valid_results, 
-            key=lambda x: x['metrics'].get(self.optimization_target, float('-inf')),
+            self.results, 
+            key=lambda x: x['metrics'].get(self.optimization_target, float('-inf')), 
             reverse=True
         )
         
+        # Return top N
         return sorted_results[:n]
-    
+        
     def get_param_importance(self) -> Dict[str, float]:
         """
-        Estimate parameter importance based on correlation with the optimization target.
+        Calculate parameter importance based on correlation with optimization target.
         
         Returns:
-            Dictionary of parameter importance scores
+            Dictionary mapping parameter names to importance scores
         """
-        if not self.results:
-            return {}
-            
-        # Prepare data for correlation analysis
+        # Convert results to DataFrame
         data = []
-        for result in self.results:
-            if self.optimization_target in result['metrics']:
-                row = {}
-                # Add parameters
-                for param, value in result['params'].items():
-                    # Only use numeric parameters
-                    if isinstance(value, (int, float)):
-                        row[param] = value
-                
-                # Add target metric
-                row[self.optimization_target] = result['metrics'][self.optimization_target]
-                
-                data.append(row)
         
+        for result in self.results:
+            row = {}
+            
+            # Flatten parameters
+            for param_name, param_value in result['params'].items():
+                # Skip non-numeric parameters
+                if not isinstance(param_value, (int, float, np.number)):
+                    continue
+                row[param_name] = param_value
+                
+            # Add optimization target
+            if self.optimization_target in result['metrics']:
+                row[self.optimization_target] = result['metrics'][self.optimization_target]
+                data.append(row)
+                
         if not data:
+            logger.warning("No valid data for parameter importance calculation")
             return {}
             
-        # Create DataFrame
+        # Convert to DataFrame
         df = pd.DataFrame(data)
         
-        # Calculate correlations
-        correlations = {}
-        for param in df.columns:
-            if param != self.optimization_target:
-                correlation = df[param].corr(df[self.optimization_target])
-                correlations[param] = abs(correlation)  # Use absolute value for importance
-        
-        # Normalize to sum to 1.0
-        total = sum(correlations.values())
-        if total > 0:
-            for param in correlations:
-                correlations[param] /= total
+        # Calculate correlation with optimization target
+        importance = {}
+        for col in df.columns:
+            if col == self.optimization_target:
+                continue
                 
-        return correlations
+            # Skip columns with only one unique value
+            if df[col].nunique() <= 1:
+                continue
+                
+            try:
+                corr = df[[col, self.optimization_target]].corr().iloc[0, 1]
+                # Use absolute correlation as importance
+                importance[col] = abs(corr)
+            except Exception as e:
+                logger.warning(f"Error calculating correlation for {col}: {str(e)}")
+                
+        # Sort by importance
+        importance = dict(sorted(importance.items(), key=lambda x: x[1], reverse=True))
+        
+        return importance
+        
+    def visualize_results(self, output_dir: str = None) -> None:
+        """
+        Create comprehensive visualizations for optimization results.
+        
+        Args:
+            output_dir: Directory to save visualizations (defaults to self.output_dir / "visualizations")
+        """
+        if not output_dir:
+            output_dir = str(self.output_dir / "visualizations")
+            
+        try:
+            from mtfema_backtester.optimization.visualization import visualize_optimization_results
+            
+            # Create visualization directory
+            viz_dir = Path(output_dir)
+            viz_dir.mkdir(exist_ok=True, parents=True)
+            
+            # Generate visualizations
+            visualize_optimization_results(
+                results=self.results,
+                target_metric=self.optimization_target,
+                output_dir=str(viz_dir)
+            )
+            
+            logger.info(f"Optimization visualizations created in {viz_dir}")
+            
+        except ImportError:
+            logger.warning("Visualization module not available. Skipping visualization generation.")
+        except Exception as e:
+            logger.error(f"Error generating visualizations: {str(e)}")
+            
+    def run_bayesian_search(self, n_calls=50, surrogate_model='GP', 
+                           acq_func='EI', n_initial_points=10, save_results=True):
+        """
+        Run Bayesian optimization search (placeholder method).
+        
+        This method requires the BayesianOptimizer class which will be implemented separately.
+        
+        Args:
+            n_calls: Total number of function evaluations
+            surrogate_model: Type of surrogate model ('GP', 'RF', or 'GBRT')
+            acq_func: Acquisition function type ('EI', 'PI', 'LCB', etc.)
+            n_initial_points: Number of initial random points
+            save_results: Whether to save results
+            
+        Returns:
+            Dictionary with best parameters and metrics
+        """
+        logger.warning("Bayesian optimization not directly supported in base Optimizer class.")
+        logger.info("To use Bayesian optimization, use BayesianOptimizer class instead.")
+        logger.info("Falling back to randomized search as a substitute.")
+        
+        return self.run_randomized_search(n_iter=n_calls, save_results=save_results)

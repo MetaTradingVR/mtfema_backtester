@@ -1,0 +1,46 @@
+# Override the gitignore to allow access to dashboard files during development
+# This file allows Cascade to access and modify dashboard files
+
+# Keep standard Python ignores
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Keep ignoring temporary files
+*.log
+*.tmp
+*~
+.DS_Store
+
+# Keep ignoring cache directories
+.pytest_cache/
+.mypy_cache/
+.ipynb_checkpoints/
+
+# Explicitly allow dashboard files - override gitignore
+# Next.js build outputs can still be ignored
+mtfema-dashboard/.next/
+mtfema-dashboard/node_modules/
+mtfema-dashboard/.vercel/
+
+# But allow access to dashboard source code
+!mtfema-dashboard/src/
+!mtfema-dashboard/src/components/
+!mtfema-dashboard/src/lib/
+!mtfema-dashboard/src/app/

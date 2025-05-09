@@ -1,7 +1,7 @@
 # MT 9 EMA Backtester Status Report
 
 ## Project Overview
-The Multi-Timeframe 9 EMA Extension Strategy Backtester (MT 9 EMA Backtester) is a comprehensive tool for backtesting a specific trading strategy that leverages multiple timeframes and the 9-period Exponential Moving Average (EMA).
+The Multi-Timeframe 9 EMA Extension Strategy Backtester (MT 9 EMA Backtester) is a comprehensive tool for backtesting a specific trading strategy that leverages multiple timeframes and the 9-period Exponential Moving Average (EMA). The system has been expanded to support custom indicators and live trading integrations.
 
 ## Component Status
 
@@ -16,6 +16,8 @@ The Multi-Timeframe 9 EMA Extension Strategy Backtester (MT 9 EMA Backtester) is
 | Parameter Optimization | 100% | ✅ Operational |
 | Documentation & Testing | 100% | ✅ Operational |
 | API Integration | 100% | ✅ Operational |
+| Custom Indicators Framework | 100% | ✅ Operational |
+| Indicator Development Workflow | 50% | 🔄 In Progress |
 
 ## Recent Enhancements & Fixes
 
@@ -49,10 +51,38 @@ The Multi-Timeframe 9 EMA Extension Strategy Backtester (MT 9 EMA Backtester) is
 
 ### Parameter Optimization
 - ✅ Implemented comprehensive Optimizer class in optimizer.py
+
+### Custom Indicators Framework
+- ✅ Implemented modular indicator system with Indicator base class and IndicatorRegistry
+- ✅ Added ZigZag and Fibonacci Retracement indicators to the indicator registry
+- ✅ Created example implementations and templates in the examples/ directory:
+  - custom_indicators_example.py: Comprehensive working example with PriceChannel indicator
+  - indicator_templates.py: Reusable templates for creating custom indicators
+- ✅ Enhanced documentation with step-by-step guides:
+  - docs/custom_indicators_guide.md: Complete reference for creating and using indicators
+  - examples/jupyter_integration_guide.md: Guide for using indicators in JupyterLab
+  - examples/dashboard_integration.md: Plan for web dashboard integration
+- 🔄 Planned enhancements for indicator development workflow:
+  - Visual indicator builder component for dashboard
+  - API endpoints for indicator management
+  - Indicator testing framework with interactive visualization
+  - Rules engine for strategy creation using custom indicators
 - ✅ Added support for both grid search and randomized search methods
 - ✅ Implemented parallel processing for faster optimization
 - ✅ Created result saving, tracking, and visualization tools
 - ✅ Added parameter importance analysis to identify critical parameters
+- ✅ Implemented Bayesian optimization with BayesianOptimizer class:
+  - Support for three surrogate models (GP, RF, GBRT)
+  - Multiple acquisition functions (EI, PI, LCB)
+  - Specialized visualizations for convergence and objective function
+  - Fallback to randomized search when dependencies unavailable
+- ✅ Enhanced visualization capabilities with OptimizationVisualizer class:
+  - Interactive heatmaps for parameter interactions
+  - Parallel coordinates for multi-parameter relationship analysis
+  - Parameter importance charts with correlation analysis
+  - Comprehensive optimization dashboards with Plotly
+- ✅ Added CLI integration with `optimize` mode in run_nq_test.py
+- ✅ Implemented robust error handling and graceful degradation
 
 ### Next.js Dashboard Interface
 - ✅ Created modern, responsive dashboard using Next.js and Tailwind CSS
@@ -180,12 +210,31 @@ npm run dev
 python -m mtfema_backtester.main --mode backtest --symbol SPY --start-date 2023-01-01 --end-date 2023-06-30 --save-plots
 ```
 
+### Running Optimization
+```bash
+# Grid search optimization
+python run_nq_test.py --mode optimize --optimizer grid --symbol SPY --start-date 2023-01-01 --end-date 2023-06-30
+
+# Randomized search with 50 iterations
+python run_nq_test.py --mode optimize --optimizer random --optimize-iterations 50 --symbol SPY
+
+# Bayesian optimization with Gaussian Process surrogate model
+python run_nq_test.py --mode optimize --optimizer bayesian --opt-surrogate GP --opt-acq-func EI --opt-initial-points 10 --symbol SPY
+```
+
 ### Viewing Results
 Backtest results are stored in `./output/backtest/` directory:
 - Equity curve: `{symbol}_equity_curve.csv`
 - Trades list: `{symbol}_trades.csv`
 - Performance metrics: `{symbol}_metrics.json`
 - Interactive plots: `./output/backtest/plots/` (when using `--save-plots`)
+
+Optimization results are stored in `./optimization_results/` directory:
+- All results: `results_{timestamp}/all_results.json`
+- Best parameters: `results_{timestamp}/best_result.json`
+- Parameter grid: `results_{timestamp}/param_grid.json`
+- Visualizations: `results_{timestamp}/visualizations/`
+- Bayesian specific results: `bayesian_results_{timestamp}/`
 
 ### Live Trading
 ```python
@@ -212,12 +261,31 @@ docker-compose up -d
 docker exec mtfema python -m mtfema_backtester.main --mode backtest --symbol SPY
 ```
 
+## Recent Progress
+
+### API Server Enhancements (Phase 2)
+- ✅ **Enhanced Optimization API Endpoints**:
+  - Implemented parameter importance analysis with real correlation calculations
+  - Created dynamic parameter heatmap endpoint with data interpolation
+  - Added parallel coordinates data endpoint for multi-parameter visualization
+  - Built optimization metrics endpoint for retrieving available metrics
+  - Implemented optimization control endpoint for canceling running optimizations
+  - Improved error handling and data validation across all endpoints
+  - Replaced sample data with connections to actual optimization framework
+  - Added support for proper data processing and transformation
+
 ## Next Steps
-1. Complete data integration between Python backend and Next.js dashboard
-2. Implement real-time API for live trading dashboard updates
-3. Add export functionality for dashboard visualizations
-4. Enhance mobile responsiveness of dashboard components
-5. Implement user authentication and settings persistence
-6. Explore machine learning integration for strategy enhancement
-7. Develop multi-symbol backtesting capability
-8. Implement portfolio-level analysis tools 
+1. **Continue Web Interface Enhancement (Phase 2)**:
+   - ✅ Develop backend API endpoints to expose optimization functionality
+   - Create optimization-specific UI components in the dashboard
+   - Build interactive parameter configuration forms
+   - Implement visualization components for optimization results
+   - Improve data flow between Python backend and Next.js frontend
+   - ✅ Integrate optimization API endpoints with Next.js dashboard
+
+2. Other planned improvements:
+   - Add real-time API for live trading dashboard updates
+   - Enhance mobile responsiveness of dashboard components
+   - Explore machine learning integration for strategy enhancement
+   - Develop multi-symbol backtesting capability
+   - Implement portfolio-level analysis tools 

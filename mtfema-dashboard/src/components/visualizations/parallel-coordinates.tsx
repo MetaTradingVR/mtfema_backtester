@@ -31,16 +31,22 @@ export function ParallelCoordinates({
       // Prepare data for parallel coordinates
       // Extract all parameter values and the color metric
       const dimensions = parameters.map(param => {
-        const values = data.map((item: any) => item[param]);
+        const values = data.map((item: any) => item[param] || 0); // Use 0 as fallback for null/undefined
+        const filteredValues = values.filter((val: any) => val !== null && val !== undefined);
+        const min = filteredValues.length > 0 ? Math.min(...filteredValues) : 0;
+        const max = filteredValues.length > 0 ? Math.max(...filteredValues) : 1;
         return {
           label: param,
           values,
-          range: [Math.min(...values), Math.max(...values)]
+          range: [min, max]
         };
       });
 
       // Extract color metric values
-      const colorValues = data.map((item: any) => item[colorMetric]);
+      const colorValues = data.map((item: any) => {
+        const value = item[colorMetric];
+        return value !== null && value !== undefined ? value : 0;
+      });
       
       // Create the parallel coordinates trace
       const trace = {

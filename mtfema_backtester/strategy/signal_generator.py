@@ -9,6 +9,8 @@ import pandas as pd
 import numpy as np
 import logging
 
+from mtfema_backtester.indicators.fibonacci_targets import calculate_fib_targets
+
 logger = logging.getLogger(__name__)
 
 def generate_signals(timeframe_data, params=None):
@@ -29,145 +31,135 @@ def generate_signals(timeframe_data, params=None):
     
     # Process each timeframe
     for tf in timeframe_data.get_available_timeframes():
-        # Get data for this timeframe
-        data = timeframe_data.get_timeframe(tf)
-        if data is None or data.empty:
-            logger.warning(f"No data available for timeframe {tf}")
-            continue
+        try:
+            # Skip timeframes without all required data
+            if not timeframe_data.has_price_data(tf) or not timeframe_data.has_indicator(tf, "EMA_9"):
+                logger.warning(f"Skipping {tf} timeframe due to missing data")
+                continue
+                
+            # Get price data and indicators for this timeframe
+            price_data = timeframe_data.get_price_data(tf)
+            ema_9 = timeframe_data.get_indicator(tf, "EMA_9")
             
-        # Get extension threshold for this timeframe
-        extension_threshold = params.get_extension_threshold(tf)
-        
-        # Find reclamation points (use Reclamation DataFrame directly)
-        reclamation_data = timeframe_data.get_indicator(tf, "Reclamation")
-        if reclamation_data is None or reclamation_data.empty:
-            logger.info(f"No reclamation data available for timeframe {tf}")
-            continue
+            # Skip timeframes with insufficient data
+            if len(price_data) < 20 or len(ema_9) < 20:
+                logger.warning(f"Skipping {tf} timeframe due to insufficient data points")
+                continue
+                
+            # Get extension threshold for this timeframe
+            extension_threshold = params['ema']['extension_thresholds'].get(
+                tf, 1.0  # Default to 1.0% if not specified
+            )
             
-        extension_data = timeframe_data.get_indicator(tf, "Extension")
-        if extension_data is None or extension_data.empty:
-            logger.info(f"No extension data available for timeframe {tf}")
-            continue
-            
-        # Process bullish reclamations
-        if 'BullishReclaim' in reclamation_data.columns:
-            bullish_reclaims = reclamation_data[reclamation_data['BullishReclaim']].index
-            for idx in bullish_reclaims:
+            # PaperFeet is optional and used for additional confirmation if available
+            use_paperfeet = timeframe_data.has_indicator(tf, "PaperFeet")
+                
+            # Analyze each bar for signals
+            for i in range(2, len(price_data)):
+                # Skip weekends and holidays if daily timeframe
+                if tf == "1d" and not is_trading_day(price_data.index[i]):
+                    continue
+                    
+                idx = price_data.index[i]
+                
+                # Get current and previous values
+                curr_close = price_data['Close'].iloc[i]
+                curr_ema = ema_9.iloc[i]
+                prev_close = price_data['Close'].iloc[i-1]
+                prev_ema = ema_9.iloc[i-1]
+                
+                # Calculate the extension percentage from EMA
+                extension_pct = abs(curr_close - curr_ema) / curr_ema * 100
+                
+                # Check for EMA reclamation on current bar after extension
                 try:
-                    # Get price data at reclamation point
-                    price_data = data.loc[idx]
-                    
-                    # Verify extension condition
-                    extension_pct = extension_data.loc[idx]
-                    if hasattr(extension_pct, 'iloc'):
-                        extension_pct = extension_pct.iloc[0]
+                    # BULLISH reclamation - price moves from below EMA to above EMA
+                    # after being extended below EMA by the threshold percentage
+                    if (prev_close < prev_ema and                    # Previous bar closed below EMA
+                        prev_close <= prev_ema * (1 - extension_threshold/100) and  # Previous close extended below EMA
+                        curr_close > curr_ema):                     # Current bar closes above EMA
                         
-                    if extension_pct < extension_threshold:
-                        logger.debug(f"Skipping bullish signal at {idx} due to insufficient extension: {extension_pct} < {extension_threshold}")
-                        continue
+                        # Set initial paperfeet confirmation to True (will be set to False if check fails)
+                        paperfeet_ok = True
                         
-                    # Find recent swing low for stop placement
-                    n_bars_back = params.get_param('risk_management.lookback_bars', 5)
-                    try:
-                        lookback_idx = max(0, data.index.get_loc(idx) - n_bars_back)
-                        lookback_data = data.iloc[lookback_idx:data.index.get_loc(idx)]
-                        stop_price = lookback_data['Low'].min() * 0.99  # Add 1% buffer
-                    except Exception as e:
-                        logger.warning(f"Error finding stop price: {str(e)}. Using default stop.")
-                        # Fallback to a default stop percentage
-                        stop_pct = params.get_param('risk_management.default_stop_percent', 0.01)
-                        stop_price = price_data['Close'] * (1 - stop_pct)
-                    
-                    # Check if PaperFeet confirmation is required
-                    use_paperfeet = params.get_param('indicators.use_paperfeet_confirmation', False)
-                    paperfeet_ok = True
-                    
-                    if use_paperfeet:
-                        paperfeet_data = timeframe_data.get_indicator(tf, "PaperFeet")
-                        if paperfeet_data is not None and not paperfeet_data.empty:
-                            paperfeet_ok = validate_paperfeet_transition(paperfeet_data, idx, is_long=True)
-                    
-                    if not paperfeet_ok:
-                        logger.debug(f"Skipping bullish signal at {idx} due to PaperFeet confirmation failure")
-                        continue
-                    
-                    # Create the signal
-                    signal = {
-                        'datetime': idx,
-                        'timeframe': tf,
-                        'type': 'LONG',
-                        'entry_price': float(price_data['Close']),
-                        'stop_price': float(stop_price),
-                        'extension_pct': float(extension_pct),
-                        'reclamation_bar': True,
-                        'confidence': calculate_signal_confidence(extension_pct, extension_threshold, tf)
-                    }
-                    
-                    signals.append(signal)
-                    logger.info(f"Generated LONG signal at {idx} on {tf} timeframe with extension {extension_pct:.2%}")
-                    
+                        # Calculate stop price (below recent swing low)
+                        lookback = 10
+                        lookback_section = price_data.iloc[max(0, i-lookback):i]
+                        stop_price = lookback_section['Low'].min() * 0.999  # Just below recent low
+                        
+                        if use_paperfeet:
+                            paperfeet_data = timeframe_data.get_indicator(tf, "PaperFeet")
+                            if paperfeet_data is not None and not paperfeet_data.empty:
+                                paperfeet_ok = validate_paperfeet_transition(paperfeet_data, idx, is_long=True)
+                        
+                        if not paperfeet_ok:
+                            logger.debug(f"Skipping bullish signal at {idx} due to PaperFeet confirmation failure")
+                            continue
+                        
+                        # Create the signal
+                        signal = {
+                            'datetime': idx,
+                            'timeframe': tf,
+                            'type': 'LONG',
+                            'entry_price': float(price_data['Close'].iloc[i]),
+                            'stop_price': float(stop_price),
+                            'extension_pct': float(extension_pct),
+                            'reclamation_bar': True,
+                            'confidence': calculate_signal_confidence(extension_pct, extension_threshold, tf)
+                        }
+                        
+                        # Add Fibonacci targets
+                        signal_with_targets = calculate_fib_targets(signal, price_data.iloc[:i+1])
+                        
+                        signals.append(signal_with_targets)
+                        logger.info(f"Generated LONG signal at {idx} on {tf} timeframe with extension {extension_pct:.2%}")
+                        
+                    # BEARISH reclamation - price moves from above EMA to below EMA
+                    # after being extended above EMA by the threshold percentage
+                    elif (prev_close > prev_ema and                  # Previous bar closed above EMA
+                          prev_close >= prev_ema * (1 + extension_threshold/100) and  # Previous close extended above EMA
+                          curr_close < curr_ema):                   # Current bar closes below EMA
+                        
+                        # Set initial paperfeet confirmation to True (will be set to False if check fails)
+                        paperfeet_ok = True
+                        
+                        # Calculate stop price (above recent swing high)
+                        lookback = 10
+                        lookback_section = price_data.iloc[max(0, i-lookback):i]
+                        stop_price = lookback_section['High'].max() * 1.001  # Just above recent high
+                        
+                        if use_paperfeet:
+                            paperfeet_data = timeframe_data.get_indicator(tf, "PaperFeet")
+                            if paperfeet_data is not None and not paperfeet_data.empty:
+                                paperfeet_ok = validate_paperfeet_transition(paperfeet_data, idx, is_long=False)
+                        
+                        if not paperfeet_ok:
+                            logger.debug(f"Skipping bearish signal at {idx} due to PaperFeet confirmation failure")
+                            continue
+                        
+                        # Create the signal
+                        signal = {
+                            'datetime': idx,
+                            'timeframe': tf,
+                            'type': 'SHORT',
+                            'entry_price': float(price_data['Close'].iloc[i]),
+                            'stop_price': float(stop_price),
+                            'extension_pct': float(extension_pct),
+                            'reclamation_bar': True,
+                            'confidence': calculate_signal_confidence(extension_pct, extension_threshold, tf)
+                        }
+                        
+                        # Add Fibonacci targets
+                        signal_with_targets = calculate_fib_targets(signal, price_data.iloc[:i+1])
+                        
+                        signals.append(signal_with_targets)
+                        logger.info(f"Generated SHORT signal at {idx} on {tf} timeframe with extension {extension_pct:.2%}")
+                        
                 except (KeyError, IndexError, ValueError) as e:
-                    logger.warning(f"Error generating bullish signal at {idx}: {str(e)}")
-        
-        # Process bearish reclamations
-        if 'BearishReclaim' in reclamation_data.columns:
-            bearish_reclaims = reclamation_data[reclamation_data['BearishReclaim']].index
-            for idx in bearish_reclaims:
-                try:
-                    # Get price data at reclamation point
-                    price_data = data.loc[idx]
-                    
-                    # Verify extension condition
-                    extension_pct = extension_data.loc[idx]
-                    if hasattr(extension_pct, 'iloc'):
-                        extension_pct = extension_pct.iloc[0]
-                        
-                    if extension_pct < extension_threshold:
-                        logger.debug(f"Skipping bearish signal at {idx} due to insufficient extension: {extension_pct} < {extension_threshold}")
-                        continue
-                        
-                    # Find recent swing high for stop placement
-                    n_bars_back = params.get_param('risk_management.lookback_bars', 5)
-                    try:
-                        lookback_idx = max(0, data.index.get_loc(idx) - n_bars_back)
-                        lookback_data = data.iloc[lookback_idx:data.index.get_loc(idx)]
-                        stop_price = lookback_data['High'].max() * 1.01  # Add 1% buffer
-                    except Exception as e:
-                        logger.warning(f"Error finding stop price: {str(e)}. Using default stop.")
-                        # Fallback to a default stop percentage
-                        stop_pct = params.get_param('risk_management.default_stop_percent', 0.01)
-                        stop_price = price_data['Close'] * (1 + stop_pct)
-                    
-                    # Check if PaperFeet confirmation is required
-                    use_paperfeet = params.get_param('indicators.use_paperfeet_confirmation', False)
-                    paperfeet_ok = True
-                    
-                    if use_paperfeet:
-                        paperfeet_data = timeframe_data.get_indicator(tf, "PaperFeet")
-                        if paperfeet_data is not None and not paperfeet_data.empty:
-                            paperfeet_ok = validate_paperfeet_transition(paperfeet_data, idx, is_long=False)
-                    
-                    if not paperfeet_ok:
-                        logger.debug(f"Skipping bearish signal at {idx} due to PaperFeet confirmation failure")
-                        continue
-                    
-                    # Create the signal
-                    signal = {
-                        'datetime': idx,
-                        'timeframe': tf,
-                        'type': 'SHORT',
-                        'entry_price': float(price_data['Close']),
-                        'stop_price': float(stop_price),
-                        'extension_pct': float(extension_pct),
-                        'reclamation_bar': True,
-                        'confidence': calculate_signal_confidence(extension_pct, extension_threshold, tf)
-                    }
-                    
-                    signals.append(signal)
-                    logger.info(f"Generated SHORT signal at {idx} on {tf} timeframe with extension {extension_pct:.2%}")
-                    
-                except (KeyError, IndexError, ValueError) as e:
-                    logger.warning(f"Error generating bearish signal at {idx}: {str(e)}")
+                    logger.warning(f"Error generating signal at {idx}: {str(e)}")
+        except Exception as e:
+            logger.error(f"Error processing timeframe {tf}: {str(e)}")
+            continue
     
     if not signals:
         logger.warning("No trading signals generated")

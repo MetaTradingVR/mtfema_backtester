@@ -8,7 +8,6 @@ import { ParameterHeatmap } from "@/components/visualizations/parameter-heatmap"
 import { ParameterImpact } from "@/components/visualizations/parameter-impact";
 import { ParallelCoordinates } from "@/components/visualizations/parallel-coordinates";
 import { LiveTradingDashboard } from "@/components/visualizations/live-trading-dashboard";
-import { ThemeSwitcher } from "@/components/ui/theme-switcher";
 import { fetchBacktestResults, fetchOptimizationResults, runBacktest, type BacktestResult, type OptimizationResult } from "@/lib/api";
 import { EquityCurve } from "@/components/visualizations/equity-curve";
 import { DrawdownAnalysis } from "@/components/visualizations/drawdown-analysis";
@@ -101,19 +100,6 @@ export default function Home() {
 
   return (
     <div className="flex min-h-screen flex-col">
-      {/* Header */}
-      <header className="border-b">
-        <div className="container py-4 flex justify-between items-center">
-          <h1 className="text-2xl font-bold">MT 9 EMA Backtester</h1>
-          <nav className="flex gap-4 items-center">
-            <a href="#" className="hover:underline">Documentation</a>
-            <ThemeSwitcher />
-            <Button onClick={handleRunBacktest} disabled={isBacktesting}>
-              {isBacktesting ? "Running..." : "Run Backtest"}
-            </Button>
-          </nav>
-        </div>
-      </header>
 
       {/* Main content */}
       <div className="flex-1 flex">
